@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revobots-arm"
+version = "0.1.0"
+description = "Extensible arm teleoperation, cameras, recording and inference"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "opencv-python>=4.8"]
+
+[project.optional-dependencies]
+gamepad = ["pygame>=2.5"]
+realsense = ["pyrealsense2>=2.54; platform_system != 'Darwin'"]
+
+[project.scripts]
+revobots-arm-teleop = "revobots_arm.runtime.teleoperation:main"
+revobots-arm-record = "revobots_arm.runtime.record:main"
+revobots-arm-replay = "revobots_arm.runtime.replay:main"
+revobots-arm-inference = "revobots_arm.runtime.inference:main"
+revobots-arm-convert = "revobots_arm.recording.conversion:main"
+revobots-arm-cameras = "revobots_arm.cameras.diagnostics:main"
+revobots-arm-gamepad = "revobots_arm.teleoperators.gamepad.reader:main"
+revobots-arm-gamepad-client = "revobots_arm.teleoperators.gamepad.client:main"
+revobots-arm-leader-client = "revobots_arm.teleoperators.leader.client:main"
+revobots-arm-nero-ik = "revobots_arm.inverse_kinematics.nero:main"
+revobots-arm-so101-ik = "revobots_arm.inverse_kinematics.so101:main"
+revobots-arm-episode-annotate = "revobots_arm.annotation.server:main"
+revobots-arm-depth = "revobots_arm.telemetry.depth:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["revobots_arm*"]
+
+[tool.setuptools.package-data]
+revobots_arm = ["assets/**/*", "annotation/web/*"]

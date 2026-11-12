@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<!--
+  Derived from the Koch v1.1 model by s1lent4gnt, licensed Apache-2.0 (see LICENSE).
+  https://github.com/s1lent4gnt/koch-v1-1/blob/cc1a4eb9b27978b6bc3bb34f12fa5a7d229f1fde/simulation/follower.urdf
+  Adapted for kinematics: meshes and inertials omitted, jaw pivot represented as a fixed tool frame.
+-->
+<robot name="koch_v1_1">
+  <link name="base_link" />
+  <link name="link_1" />
+  <link name="link_2" />
+  <link name="link_3" />
+  <link name="link_4" />
+  <link name="link_5" />
+  <link name="gripper_tcp" />
+
+  <joint name="joint_1" type="revolute">
+    <origin xyz="0.012 0 0.0409" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="link_1" />
+    <axis xyz="0 0 -1" />
+    <limit lower="-3.14" upper="3.14" effort="0.5" velocity="100" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <origin xyz="0 -0.0209 0.0154" rpy="0 0 0" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="0.5" velocity="100" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <origin xyz="-0.0148 0.0065 0.1083" rpy="0 0 0" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="0.5" velocity="100" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <origin xyz="-0.10048 5E-05 0.0026999" rpy="0 0 0" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-3.14" upper="3.14" effort="0.5" velocity="100" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <origin xyz="-0.045 0.013097 0" rpy="0 0 0" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="1 0 0" />
+    <limit lower="-3.14" upper="3.14" effort="0.5" velocity="100" />
+  </joint>
+  <joint name="gripper_tcp_joint" type="fixed">
+    <origin xyz="-0.01315 -0.0075 0.0145" rpy="0 0 0" />
+    <parent link="link_5" />
+    <child link="gripper_tcp" />
+  </joint>
+</robot>

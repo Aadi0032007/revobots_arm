@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Revobots · Episode Studio</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><span class="logo">R</span><div>REVOBOTS<span class="sub">EPISODE STUDIO</span></div></div><span class="local">● LOCAL WORKSPACE</span><span id="save-status" role="status">Loading recording…</span></header>
+<main>
+<section class="workspace">
+ <div class="title"><div><div class="eyebrow">CONTINUOUS CAPTURE → CURATED EPISODES</div><h1>Find the moments that matter.</h1></div><span id="source-count" class="pill">—</span></div>
+ <div class="sourcebar"><label>Recording<select id="source" aria-label="Recording"></select></label><label>Camera<select id="camera" aria-label="Camera"></select></label><label class="check"><input id="all-cameras" type="checkbox"> All cameras</label><span id="source-path"></span></div>
+ <div id="viewer" class="viewer"><div id="frames"></div><div id="frame-status" class="frame-status">Loading preview…</div><div class="viewer-label">FRAME-ALIGNED PREVIEW</div></div>
+ <div class="transport"><button id="play" class="icon" title="Play or pause (K)">▶ Play</button><button id="previous" class="icon" title="Previous frame (←)">←</button><button id="next" class="icon" title="Next frame (→)">→</button><span id="timecode">00:00.000</span><span id="frame-label">FRAME — / —</span><label class="goto">Go to frame<input id="goto" type="number" min="0" value="0"></label></div>
+ <div class="timeline"><div id="segments"></div><input id="scrubber" aria-label="Recording timeline" type="range" min="0" max="1" value="0"><div class="ruler"><span>00:00</span><span>DRAG TO SCRUB · ← → FRAME STEP · SHIFT TO JUMP</span><span id="duration">—</span></div></div>
+ <div class="markbar"><div><span id="mark-state" class="eyebrow">SELECT AN EPISODE</span><p id="mark-description">Set a start, then move to the last frame you want to keep.</p></div><button id="cancel" class="quiet" hidden>Cancel</button><button id="mark" class="primary">＋ Mark start <kbd>Space</kbd></button></div>
+ <div id="notice" role="status"></div>
+ <footer><span>Original recordings stay untouched.</span><span>Space: start/end · K: play/pause · Esc: cancel mark</span></footer>
+</section>
+<aside>
+ <div class="aside-title"><div><div class="eyebrow">YOUR SELECTION</div><h2>Episodes <span id="episode-count">0</span></h2></div><button id="undo" class="quiet" title="Undo last edit">Undo</button></div>
+ <label class="task-default">Task for new episodes<input id="task" placeholder="e.g. Pick the cube and place it in the tray"></label>
+ <div id="episodes" class="episodes"><div class="empty">Your first episode starts here.<br><small>Press Space to mark its beginning.</small></div></div>
+ <section class="export"><div class="eyebrow">READY FOR TRAINING</div><h3>Export your selection</h3><p>Each marked range becomes one aligned session, including every camera and depth stream.</p><button id="export" class="secondary">Export sessions <span>↗</span></button><label>Hugging Face dataset ID<input id="repo-id" placeholder="username/dataset-name"></label><button id="convert" class="primary">Export + convert to LeRobot</button><small>Creates a local dataset using the existing converter. Nothing is uploaded.</small><div id="job" role="status"></div></section>
+</aside>
+</main></body></html>

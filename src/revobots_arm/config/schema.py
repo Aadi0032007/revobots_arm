@@ -318,6 +318,7 @@ class CartesianIKConfig:
     orientation_weight: float = 1.0
     max_joint_step_deg: float = 1.0
     leader_calibration: str | None = None
+    wrist_priority: bool = False
 
 
 @dataclass

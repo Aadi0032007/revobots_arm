@@ -41,6 +41,7 @@ from revobots_arm.robots.nero.driver import (
 from revobots_arm.utils.parsing import parse_csv, parse_offsets
 
 NERO_ARM_JOINTS = NERO_JOINTS
+NERO_WRIST_JOINTS = tuple(NERO_JOINTS[-3:])
 NERO_TIP_LINK = "link7"
 
 

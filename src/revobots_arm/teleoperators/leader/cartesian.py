@@ -18,7 +18,7 @@ from revobots_arm.inverse_kinematics.core import (
     rotvec_to_matrix,
     rpy_to_matrix,
 )
-from revobots_arm.inverse_kinematics.nero import NERO_TIP_LINK, NERO_URDF
+from revobots_arm.inverse_kinematics.nero import NERO_TIP_LINK, NERO_URDF, NERO_WRIST_JOINTS
 from revobots_arm.inverse_kinematics.so101 import SO101_TIP_LINK, SO101_URDF
 from revobots_arm.teleoperators.leader.joint_stream import leader_joint_calibration
 from revobots_arm.teleoperators.leader.koch import KOCH_ARM_MOTORS, KOCH_URDF
@@ -77,6 +77,9 @@ def _kinematics(cfg: CartesianIKConfig, role: str, device_type: str) -> ArmKinem
             urdf_joints=chain.joint_names,
             joint_signs=signs,
             joint_offsets_deg=offsets,
+            preferred_orientation_motors=(
+                NERO_WRIST_JOINTS if role == "follower" and cfg.wrist_priority else ()
+            ),
         )
     )
 

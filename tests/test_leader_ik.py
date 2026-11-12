@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from revobots_arm.config.devices import load_config
+from revobots_arm.inverse_kinematics.core import rotvec_to_matrix
 from revobots_arm.teleoperators.leader.cartesian import CartesianRetargeter
 from revobots_arm.teleoperators.leader.koch import KOCH_ARM_MOTORS
 from revobots_arm.teleoperators.leader.joint_stream import (
@@ -17,6 +18,27 @@ from revobots_arm.transport.ai_link import UdpJsonListener
 
 
 class LeaderIKTests(unittest.TestCase):
+    def test_nero_wrist_priority_reduces_arm_motion_during_tool_roll(self):
+        with patch("revobots_arm.config.devices.ensure_lerobot_importable"):
+            default = load_config("nero", ["--ik=true"])
+            preferred = load_config("nero", ["--ik=true", "--ik.wrist_priority=true"])
+        default_follower = CartesianRetargeter(default).follower
+        preferred_follower = CartesianRetargeter(preferred).follower
+
+        start = np.radians([0, 20, 0, 60, 0, 10, 0])
+        target = default_follower.fk(start)
+        roll = rotvec_to_matrix(np.radians([0, 0, 0.7]))
+        target[:3, :3] = target[:3, :3] @ roll
+        baseline = default_follower.solve(target, start)
+        result = preferred_follower.solve(target, start)
+
+        self.assertLess(result.pos_err, 0.0001)
+        self.assertLess(result.rot_err, 0.001)
+        self.assertLess(
+            np.linalg.norm(result.q[:4] - start[:4]),
+            0.5 * np.linalg.norm(baseline.q[:4] - start[:4]),
+        )
+
     def test_so101_drives_all_seven_native_nero_targets(self):
         with patch("revobots_arm.config.devices.ensure_lerobot_importable"):
             legacy = load_config("nero", ["--ik=false"])

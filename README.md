@@ -209,6 +209,14 @@ Other pairs default to aligned base frames and 1:1 translation. Set
 follows XYZ only. For continuous data
 capture, add `--record.continuous=true` to the teleop command.
 
+### Nero wrist priority
+
+Wrist priority is off by default. Enable it with `--teleop.wrist_priority=true`
+for `nero_gamepad` or `--ik.wrist_priority=true` with `--ik=true` for leader
+teleop. It favors joints 5–7 for orientation corrections while preserving the
+position task at the selected tool point. For gamepad motion around the nominal
+grasp point, set `--teleop.tip_link=gripper_tcp`.
+
 ## Continuous recording and episode annotation
 
 Record immediately after teleoperation becomes ready, without pressing Space:

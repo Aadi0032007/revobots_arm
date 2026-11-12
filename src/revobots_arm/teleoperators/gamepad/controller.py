@@ -76,6 +76,7 @@ from revobots_arm.inverse_kinematics.core import (
     format_pose,
     rotvec_to_matrix,
 )
+from revobots_arm.inverse_kinematics.nero import NERO_WRIST_JOINTS
 from revobots_arm.inverse_kinematics.so101 import (
     SO101_ARM_JOINTS,
     SO101_TIP_LINK,
@@ -188,6 +189,7 @@ class GamepadEETeleopConfig(_TeleoperatorConfig):
     look_deg: list[float] | None = None
     look_speed_deg_s: float = 30.0
     look_min_time_s: float = 2.0
+    wrist_priority: bool = False
 
 
 class GamepadEETeleop(_Teleoperator):
@@ -218,6 +220,9 @@ class GamepadEETeleop(_Teleoperator):
                 joint_signs={m: -1.0 for m in parse_csv(config.invert_joints)},
                 joint_offsets_deg=parse_offsets(config.joint_offsets_deg),
                 limit_margin_deg=config.limit_margin_deg,
+                preferred_orientation_motors=(
+                    NERO_WRIST_JOINTS if config.wrist_priority else ()
+                ),
             )
         )
         bad = [a for a in parse_csv(config.invert) if a not in AXES]
@@ -731,6 +736,7 @@ class GamepadEETeleop(_Teleoperator):
         q_seed: np.ndarray,
         orientation_axes=None,
         translation_only: bool = False,
+        warn_on_failure: bool = True,
     ) -> np.ndarray | None:
         """IK for one jog step; None (with a warning) when the position cannot be reached."""
         c = self.config
@@ -776,10 +782,11 @@ class GamepadEETeleop(_Teleoperator):
             and res.rot_err > math.radians(c.max_rot_error_deg)
         )
         if not np.all(np.isfinite(res.q)) or res.pos_err > c.max_pos_error_m or rot_bad:
-            self._warn(
-                "reach",
-                f"target pose not reached ({res.pos_err * 1e3:.1f} mm, {math.degrees(res.rot_err):.1f} deg): holding.",
-            )
+            if warn_on_failure:
+                self._warn(
+                    "reach",
+                    f"target pose not reached ({res.pos_err * 1e3:.1f} mm, {math.degrees(res.rot_err):.1f} deg): holding.",
+                )
             return None
         return res.q
 
@@ -796,16 +803,16 @@ class GamepadEETeleop(_Teleoperator):
     def _step_frame(self, dp: np.ndarray, dtheta: np.ndarray) -> None:
         T = self.kin.fk(self._q)
         p, R = T[:3, 3], T[:3, :3]
-        dR = rotvec_to_matrix(dtheta)
-        if self._frame == "tool":
-            p_t = p + R @ dp
-            R_t = R @ dR
-        else:
-            p_t = p + dp
-            R_t = dR @ R
-        q = self._solve(self._floor(p, p_t), R_t, self._q)
-        if q is not None:
-            self._commit(q)
+        tool_frame = self._frame == "tool"
+        target = self._floor(p, p + (R @ dp if tool_frame else dp))
+        # Near the workspace edge a smaller jog may satisfy the same tolerances.
+        for fraction, position in ((1.0, target), (0.5, (p + target) * 0.5)):
+            dR = rotvec_to_matrix(dtheta * fraction)
+            rotation = R @ dR if tool_frame else dR @ R
+            q = self._solve(position, rotation, self._q, warn_on_failure=fraction < 1.0)
+            if q is not None:
+                self._commit(q)
+                return
 
     # -- "arm" mode: 5-DOF aware ----------------------------------------------------
 

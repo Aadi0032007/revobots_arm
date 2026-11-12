@@ -330,6 +330,7 @@ def solve_ik(
     *,
     orientation_weight: float = 1.0,
     orientation_axes: Iterable[int] | None = None,
+    preferred_orientation_joints: tuple[int, ...] = (),
     max_iters: int = 30,
     pos_tol: float = 1e-4,
     rot_tol: float = 1e-3,
@@ -343,7 +344,11 @@ def solve_ik(
     ``orientation_axes``: indices of joints whose current world axes are the ONLY rotation
     axes the orientation task tracks. For a 5-DOF arm pass (pitch joint, roll joint): the
     error about the remaining axis (the gripper's azimuth, which the arm cannot set
-    independently of its position) is ignored instead of being fought."""
+    independently of its position) is ignored instead of being fought.
+
+    ``preferred_orientation_joints`` lowers the cost of moving these joints
+    during the orientation solve. All free joints can still contribute.
+    """
     q_seed = np.asarray(list(q_seed), dtype=float)
     q = q_seed.copy()
     # A joint already outside its (margin-shrunk) limit may stay there, but not go further out.
@@ -352,6 +357,11 @@ def solve_ik(
     p_t = target[:3, 3]
     R_t = target[:3, :3]
     axes_idx = list(orientation_axes) if orientation_axes is not None else None
+    orientation_scale = None
+    if preferred_orientation_joints and orientation_weight > 0.0:
+        # A given movement counts twice for non-preferred joints.
+        orientation_scale = np.full(chain.n, 0.5)
+        orientation_scale[list(preferred_orientation_joints)] = 1.0
 
     iterations = 0
     for iterations in range(1, max_iters + 1):
@@ -379,6 +389,11 @@ def solve_ik(
             if orientation_weight > 0.0 and A.shape[1]:
                 # Damping belongs in the solve, not in the null-space projector:
                 # I - damped_pinv(A) @ A is not a true null-space projector.
+                if orientation_scale is not None:
+                    # Build the null space in weighted joint coordinates, then
+                    # map it back so the orientation step still preserves position.
+                    scale = orientation_scale[free]
+                    A = A * scale
                 _, singular, Vt = np.linalg.svd(A, full_matrices=True)
                 rank = (
                     int(
@@ -391,6 +406,8 @@ def solve_ik(
                     else 0
                 )
                 Z = Vt[rank:].T
+                if orientation_scale is not None:
+                    Z = scale[:, None] * Z
                 B = Jr[:, free]
                 if Z.shape[1]:
                     dq[free] += Z @ (
@@ -464,6 +481,7 @@ class ArmKinematicsConfig:
     joint_offsets_deg: dict[str, float] = field(default_factory=dict)
     # IK keeps this far inside the URDF limits.
     limit_margin_deg: float = 1.0
+    preferred_orientation_motors: tuple[str, ...] = ()
 
 
 class ArmKinematics:
@@ -490,6 +508,12 @@ class ArmKinematics:
                 f"{self.chain.joint_names}, the config maps {urdf_joints}. Fix motors / urdf_joints (same order)."
             )
         self.motors = list(cfg.motors)
+        missing = set(cfg.preferred_orientation_motors) - set(self.motors)
+        if missing:
+            raise ValueError(f"Wrist priority requires IK motor names {sorted(missing)}")
+        self.preferred_orientation_joints = tuple(
+            self.motors.index(name) for name in cfg.preferred_orientation_motors
+        )
         self.keys = [f"{m}.pos" for m in self.motors]
         self.signs = np.array([float(cfg.joint_signs.get(m, 1.0)) for m in self.motors])
         if not np.all(np.isin(self.signs, (-1.0, 1.0))):
@@ -522,6 +546,9 @@ class ArmKinematics:
 
     def solve(self, target: np.ndarray, q_seed: Iterable[float], **kwargs) -> IKResult:
         kwargs.setdefault("limit_margin", self.limit_margin)
+        kwargs.setdefault(
+            "preferred_orientation_joints", self.preferred_orientation_joints
+        )
         return solve_ik(self.chain, target, q_seed, **kwargs)
 
     def out_of_limits(self, q: Iterable[float], slack_deg: float = 5.0) -> list[str]:

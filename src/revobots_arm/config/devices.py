@@ -52,6 +52,8 @@ Extra sections of this folder, same style:
   --cameras.eye.type=intelrealsense --cameras.eye.source=<serial> --cameras.eye.use_depth=true
   --stream.enabled=true --stream.camera=eye --stream.port=8556 --stream.hw_encode=true   (RTSP for the dashboard)
   --ik=true   Retarget a robot leader's tool motion through follower IK
+  --teleop.wrist_priority=true   Favor the Nero wrist during gamepad IK rotations
+  --ik.wrist_priority=true       Favor the Nero wrist during leader IK rotations
   --sessions_root=<dir> --ai.action_port=5010 --record.codec=mp4v --replay.ramp_s=0
 Anything not given comes from the preset (--preset, default 'nero'). Setting --robot.type or
 --teleop.type discards the preset's other keys for that section. Values are parsed as
@@ -264,7 +266,9 @@ def apply_overrides(cfg: ArmConfig, overrides: dict[str, str]) -> ArmConfig:
         parts = key.split(".")
         head = parts[0]
         val = coerce(raw)
-        if key in ("teleop.debug", "ik.enabled"):
+        if key in (
+            "teleop.debug", "ik.enabled", "teleop.wrist_priority", "ik.wrist_priority"
+        ):
             val = str2bool(raw)
 
         if head in ("robot", "teleop"):

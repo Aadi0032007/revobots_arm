@@ -48,7 +48,7 @@ class NeroRobotConfig:
     disable_on_disconnect: bool = False
     connect_timeout_s: float = 5.0
     feedback_timeout_s: float = 0.5
-    max_relative_target: float | None = 5.0
+    max_relative_target: float | None = 10.0
     with_gripper: bool = False
     gripper_mode: str = (
         "width"  # width (m), angle (deg), auto (0..100% of reported mode)

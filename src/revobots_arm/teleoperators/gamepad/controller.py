@@ -631,7 +631,7 @@ class GamepadEETeleop(_Teleoperator):
         )
 
     def _glide_max_step_deg(self) -> float:
-        """Stay inside Nero's max_relative_target (5°) even on a slow control tick."""
+        """Stay inside the configured tracking limit even on a slow control tick."""
         limit = self.config.max_tracking_error_deg
         if limit is None:
             return 4.0

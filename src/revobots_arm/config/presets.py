@@ -98,7 +98,7 @@ def nero_cartesian() -> ArmConfig:
         channel="can-nero",
         firmware_version="v121",
         speed_percent=20,
-        max_relative_target=5.0,
+        max_relative_target=10.0,
         disable_on_disconnect=False,
         with_gripper=False,
     )
@@ -144,7 +144,7 @@ def nero_gamepad() -> ArmConfig:
         gripper_min=0.0,
         gripper_max=100.0,
         gripper_speed=60.0,
-        max_tracking_error_deg=5.0,
+        max_tracking_error_deg=10.0,
         invert="x,y,roll",
         invert_gripper=True,
         pick_on_x=True,

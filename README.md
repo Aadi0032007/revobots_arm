@@ -99,6 +99,10 @@ values, which override the preset.
 The `nero_gamepad` and `so101_gamepad` presets start at 1.5× jog speed. Set
 `--teleop.initial_speed_level=2` to start at 0.5×.
 
+The Nero gamepad preset maps left-stick horizontal motion to yaw and right-stick
+horizontal motion to sideways jog. Set `--teleop.swap_stick_x=false` to use the
+standard mapping.
+
 The Nero gamepad preset uses SocketCAN `can-nero`, firmware profile `v121`, startup
 rest positioning, X/Y/B pick/place/look poses, LB open and RB close. Saved-pose
 moves continue through controller dropout. Hardware behavior requires verification

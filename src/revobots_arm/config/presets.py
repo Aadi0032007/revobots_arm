@@ -138,6 +138,7 @@ def nero_gamepad() -> ArmConfig:
     )
     cfg.teleop.update(
         initial_speed_level=5,
+        swap_stick_x=True,
         require_deadman=False,
         gripper_needs_deadman=False,
         gripper_key="gripper.pos",

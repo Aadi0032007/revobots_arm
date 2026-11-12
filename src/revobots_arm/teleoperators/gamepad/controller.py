@@ -13,7 +13,7 @@ On the gamepad computer: python -m revobots_arm.teleoperators.gamepad.client --i
 The transport is shared by all robot models using gamepad_ee. Missing/disconnected
 remote input holds the current command after udp_timeout_s (default 0.3 seconds).
 
-Mapping (W3C / Xbox layout, see gamepad.py):
+Default mapping (W3C / Xbox layout, see gamepad.py):
 
     Gamepad input        Function
     Left stick up/down   X  forward / backward
@@ -190,6 +190,7 @@ class GamepadEETeleopConfig(_TeleoperatorConfig):
     look_speed_deg_s: float = 30.0
     look_min_time_s: float = 2.0
     wrist_priority: bool = False
+    swap_stick_x: bool = False
 
 
 class GamepadEETeleop(_Teleoperator):
@@ -298,6 +299,8 @@ class GamepadEETeleop(_Teleoperator):
         c = self.config
         lin = c.max_linear_speed * self.speed_scale * 100
         ang = math.degrees(c.max_angular_speed * self.speed_scale)
+        yaw = "swing arm left/right" if c.orientation_mode == "arm" else "yaw"
+        left_x, right_x = (yaw, "Y left/right") if c.swap_stick_x else ("Y left/right", yaw)
         deadman = (
             "  HOLD LT      deadman: no motion without it\n"
             if c.require_deadman
@@ -306,13 +309,9 @@ class GamepadEETeleop(_Teleoperator):
         return (
             f"Gamepad Cartesian jog  (frame={self._frame}, speed x{self.speed_scale:.2f} = {lin:.1f} cm/s, {ang:.0f} deg/s)\n"
             f"{deadman}"
-            "  left stick   up/down = X forward/back   left/right = Y left/right\n"
-            + (
-                "  right stick  up/down = Z up/down        left/right = swing arm left/right\n"
-                if c.orientation_mode == "arm"
-                else "  right stick  up/down = Z up/down        left/right = yaw\n"
-            )
-            + "  D-pad        left/right = roll          up/down = pitch up/down\n"
+            f"  left stick   up/down = X forward/back   left/right = {left_x}\n"
+            f"  right stick  up/down = Z up/down        left/right = {right_x}\n"
+            "  D-pad        left/right = roll          up/down = pitch up/down\n"
             + (
                 "  RB / LB      gripper close / open\n"
                 if c.invert_gripper
@@ -697,6 +696,8 @@ class GamepadEETeleop(_Teleoperator):
         ly = self._shape(state.axis(AXIS_LEFT_Y), c.deadzone)
         rx = self._shape(state.axis(AXIS_RIGHT_X), c.deadzone)
         ry = self._shape(state.axis(AXIS_RIGHT_Y), c.deadzone)
+        if c.swap_stick_x:
+            lx, rx = rx, lx
         roll = (1.0 if BTN_DPAD_RIGHT in pressed else 0.0) - (
             1.0 if BTN_DPAD_LEFT in pressed else 0.0
         )
@@ -704,8 +705,6 @@ class GamepadEETeleop(_Teleoperator):
             1.0 if BTN_DPAD_DOWN in pressed else 0.0
         )
         # Stick axes are W3C: up and left are negative.
-        #   left stick  -> X (up = forward), Y (left = +Y)
-        #   right stick -> Z (up = up),       yaw (left = counter-clockwise from above)
         #   D-pad U/D   -> pitch (up = tilt gripper up)
         v = np.array([-ly * s["x"], -lx * s["y"], -ry * s["z"]])
         w = np.array([roll * s["roll"], pitch * s["pitch"], -rx * s["yaw"]])

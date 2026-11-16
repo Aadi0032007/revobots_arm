@@ -1,277 +1,335 @@
 # Revobots Arm
 
-Core package for arm control, gamepad/leader teleoperation, cameras, RTSP streaming,
-recording, replay, dataset conversion, and inference.
+Control a robot arm from a leader arm, a gamepad, a Cartesian target, or a trained LeRobot policy. Record actions, robot feedback, and camera frames together, then use those recordings for dataset creation and replay.
+
+## Features
+
+| Area | What you can do |
+| --- | --- |
+| Robots | Use the native seven-joint AgileX Nero CAN driver, the Nero LeRobot follower adapter, or Koch, SO-100, and SO-101 follower adapters. |
+| Teleoperation | Connect a local or UDP leader or gamepad. Use joint copy for compatible devices or follow the leader's tool pose with Cartesian IK. |
+| Cartesian motion | Command XYZ and roll, pitch, and yaw on Nero and SO-101 from the CLI. Read the current pose or dry-run an IK target. |
+| Cameras | Discover and preview OpenCV or RealSense cameras, capture RGB and optional RealSense depth, publish frames through shared memory, and stream RGB over RTSP. |
+| Data | Record manually marked, timed, or continuous sessions. Browse and label episodes in a local web UI, convert them to LeRobot datasets, and replay recorded actions. |
+| Policy inference | Run a trained LeRobot checkpoint alongside teleop and switch between human and policy control. |
+| Vision and hand–eye | Run YOLO or Gemini detection on a selected feed and calibrate a native Nero wrist camera offline from a ChArUco recording. |
+
+The browser UI in this repo is the **episode annotator**. The planned local robot-control console, camera-guided hover and grasp, and simulator integration are future work. The existing hover-and-grasp desktop viewer lives in the separate **REVOCORTEX** project. In this repo, the Nero gamepad's **Pick** action moves to a saved pose.
+
+## Control and data pipeline
+
+```mermaid
+flowchart LR
+    input["Leader or gamepad<br/>Local device or UDP input"] --> teleop["Teleop<br/>Joint mapping or Cartesian IK"]
+    teleop <-->|"Joint targets and feedback"| arm["Robot driver"]
+    cameras["OpenCV / RealSense"] -->|RGB and optional depth| teleop
+    cameras --> bus["Shared-memory frame bus"]
+    bus --> vision["YOLO / Gemini detection"]
+    teleop -->|Actions, observations, and frames| recording["Recorded sessions"]
+    recording --> annotation["Episode annotator"]
+    annotation --> dataset["LeRobot dataset"]
+    recording --> replay["Replay"]
+    dataset --> replay
+    replay --> arm
+    dataset --> training["LeRobot training"]
+    training -->|Checkpoint| inference["Policy inference"]
+    bus --> inference
+    teleop -->|UDP state| inference
+    inference -->|UDP actions when enabled| teleop
+```
+
+Run teleop or replay as the hardware owner. The remote input client sends leader angles or gamepad state to the robot PC. Inference uses the camera frame bus on the robot PC and returns actions to the teleop process. Vision can read the same feeds and write detections alongside a run.
 
 ## Install
 
-Requires Python 3.10 or newer:
+Use Python 3.10 or newer, subject to the requirements of your compatible LeRobot checkout and hardware SDK. Install both packages from the repository root.
 
 ```sh
-python -m pip install -e ".[gamepad]"
-python -m pip install -e <compatible-lerobot-checkout>
+python -m pip install -e .
+python -m pip install -e /path/to/compatible-lerobot
 ```
 
-Install vendor SDKs for the selected robot. RealSense support is available with
-`python -m pip install -e ".[realsense]"`. RTSP requires system GStreamer/PyGObject
-on Linux/Jetson.
+Install the [hardware driver](src/revobots_arm/robots/) for your arm. Native Nero uses `pyAgxArm`. The LeRobot checkout must provide the adapters you use and, for policy inference, `lerobot.scripts.lerobot_inference_api`.
 
-## Run
+| Optional feature | Dependency |
+| --- | --- |
+| Gamepad | `python -m pip install -e ".[gamepad]"` |
+| RealSense | `python -m pip install -e ".[realsense]"` |
+| YOLO | `python -m pip install -e ".[vision-yolo]"` |
+| Gemini | `python -m pip install -e ".[vision-gemini]"` |
+| RTSP | System GStreamer, PyGObject, and GstRtspServer on Linux or Jetson |
+| ChArUco calibration | An OpenCV build with `cv2.aruco.CharucoDetector` |
 
-```sh
-revobots-arm-teleop --preset nero_gamepad
-revobots-arm-gamepad-client --ip=192.168.1.20 --port=5001
-revobots-arm-cameras --help
-revobots-arm-record --help
-revobots-arm-replay --help
-revobots-arm-convert --help
-revobots-arm-inference --help
-```
+## Quick start
 
-Use installed `revobots-arm-*` commands or `python -m revobots_arm.runtime.teleoperation`.
-The old `src.*` imports and commands have been removed.
+The examples below use a POSIX shell. Replace example IP addresses, camera sources, and device paths with yours. On Windows a serial device is typically a `COM` port.
 
-## Depth distance telemetry for Porter / Scout
+### Gamepad on the robot PC
 
-RealSense always captures RGB. Set `use_depth=true` to add depth. When
-`--stream.enabled=true` is also set, the camera owner automatically samples each
-running RealSense depth bus at **3 Hz**. RGB goes to RTSP at the configured FPS.
-For example, use a RealSense for RGB and depth alongside a USB RGB camera:
+With the gamepad connected to the robot PC, use `nero_gamepad` for native Nero or `so101_gamepad` for SO-101.
 
 ```sh
 revobots-arm-teleop --preset nero_gamepad \
-  --cameras.eye.source=/dev/video0 \
-  --cameras.wrist2D.type=intelrealsense --cameras.wrist2D.source=CAMERA_SERIAL \
-  --cameras.wrist2D.use_depth=true --stream.enabled=true \
-  --stream.depth_robot_id=XAVIER_PORTER_001
+  --robot.channel=can-nero --robot.rest_on_start=false --cameras=none
 ```
 
-With RTSP disabled, you can run the standalone worker alongside a camera owner
-that has `use_depth=true` and `publish_frames=true`:
+The example disables the Nero preset's startup rest move and omits cameras for a motion-only setup. The default Nero gamepad preset uses SocketCAN, firmware profile `v121`, and saved X/Y/B pick, place, and look poses. LB opens the gripper and RB closes it. Check the configured CAN channel, firmware profile, camera sources, and saved poses before using a preset on a different robot. The `nero_gamepad` and `so101_gamepad` presets start at 1.5× jog speed. Use `--teleop.initial_speed_level=2` for 0.5×.
+
+### Gamepad on a separate PC
+
+```sh
+# Robot PC
+revobots-arm-teleop --preset nero_gamepad --port=5001 --robot.rest_on_start=false
+
+# PC with the gamepad
+revobots-arm-gamepad-client --ip=192.168.1.20 --port=5001
+```
+
+Use the robot PC's IP and the same UDP port on both sides. Omit `--port` on the robot PC for a local gamepad.
+
+### Presets and deployment profiles
+
+| Preset | Default setup |
+| --- | --- |
+| `nero` | Nero follower and a remote Koch leader |
+| `nero_cartesian` | Native seven-joint Nero with gamepad Cartesian control and no gripper configured |
+| `nero_gamepad` | Native Nero with gamepad, gripper, and saved poses |
+| `koch` | Koch follower and a remote Koch leader |
+| `so101` | SO-101 follower and local SO-101 leader |
+| `so101_remote` | SO-101 follower and remote SO-101 leader |
+| `so101_gamepad` | SO-101 follower and gamepad |
+
+For other configurations, set `--robot.type` and `--teleop.type` explicitly with the settings for those drivers. Each type override replaces that section's preset values. For repeatable deployments, save dotted overrides in JSON and pass `--deployment robot.json` or set `REVOBOTS_ARM_DEPLOYMENT`. CLI overrides take precedence over the deployment file, then the preset. See [presets](src/revobots_arm/config/presets.py) and the [configuration schema](src/revobots_arm/config/schema.py).
+
+## Leader and Cartesian control
+
+Enable `--ik=true` to follow a leader's tool motion. The first paired reading anchors both tools. The runtime computes the leader's pose change with forward kinematics and solves follower joint targets with IK. With Nero as the follower, it uses the native seven-joint driver and skips the startup rest move. The gripper holds its measured setting when available.
+
+### Nero + Koch leader with Cartesian IK
+
+```sh
+# Same PC, with the Koch leader plugged into the robot PC
+revobots-arm-teleop --preset nero --ik=true \
+  --teleop.type=koch_leader --teleop.port=/dev/ttyACM0 \
+  --teleop.id=rahul --ik.leader_calibration=rahul --cameras=none
+
+# Separate PCs. Run the first command on the robot PC and the second on the leader PC.
+revobots-arm-teleop --preset nero --ik=true --cameras=none
+revobots-arm-leader-client --preset nero --ik=true --ik.leader_calibration=rahul \
+  --ip 192.168.1.20 --port 5001 --com /dev/ttyACM0 --id rahul
+```
+
+The examples select the measured Koch calibration named `rahul`. For a different Koch leader, use its calibration ID and joint signs and offsets. Apply those settings on the machine connected to the leader.
+
+### Nero + SO-101 leader with Cartesian IK
+
+```sh
+# Same PC, with the SO-101 leader plugged into the robot PC
+revobots-arm-teleop --preset nero --ik=true \
+  --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 \
+  --teleop.id=bench_leader --cameras=none
+
+# Separate PCs. Robot PC and leader PC, respectively.
+revobots-arm-teleop --preset nero --ik=true \
+  --teleop.type=so101_leader_remote --teleop.port=5002 --cameras=none
+revobots-arm-leader-client --preset nero --ik=true --teleop.type=so101_leader_remote \
+  --ip 192.168.1.20 --port 5002 --com /dev/ttyACM1 --id bench_leader
+```
+
+### Nero + Koch or SO-101 leader with joint mapping
+
+Joint mode uses the Nero LeRobot follower and the matching LeRobot leader-client mapping. On one PC, run both commands in separate terminals and set the receiver host and client IP to `127.0.0.1`. On separate PCs, omit the receiver's `--teleop.host` override and set the client's `--ip` to the robot PC's LAN or Tailscale address. Use matching ports on each pair.
+
+```sh
+# Koch → Nero, terminal 1
+revobots-arm-teleop --preset nero --teleop.host=127.0.0.1 --cameras=none
+
+# Koch → Nero, terminal 2
+revobots-arm-leader-client --preset nero \
+  --ip 127.0.0.1 --port 5001 --com /dev/ttyACM0 --id bench_koch
+
+# SO-101 → Nero, terminal 1
+revobots-arm-teleop --preset nero --teleop.type=so101_leader_remote \
+  --teleop.host=127.0.0.1 --teleop.port=5002 --cameras=none
+
+# SO-101 → Nero, terminal 2
+revobots-arm-leader-client --preset nero --teleop.type=so101_leader_remote \
+  --ip 127.0.0.1 --port 5002 --com /dev/ttyACM1 --id bench_leader --use-degrees
+```
+
+SO-101 joint mapping requires a compatible LeRobot sender with `is_follower_nero` support. Its arm-joint signs and offsets are identity in the bundled REVOCORTEX mapping. Check the mapping against your physical leader and follower before moving the arm.
+
+### Cartesian tuning and direct moves
+
+Koch-to-Nero Cartesian mode defaults to 2.75× translation and aligns the starting tool headings. Other pairs default to 1:1 translation with aligned base axes. Define a different setup with `--ik.position_scale` and `--ik.frame_rpy_deg`. Set `--ik.orientation_weight=0` for XYZ-only tracking. Enable Nero wrist priority with `--ik.wrist_priority=true` for a leader or `--teleop.wrist_priority=true` for gamepad control.
+
+For a direct target, use the robot-specific IK command. XYZ is in metres and roll, pitch, and yaw are in degrees. SO-101 has five arm joints and can only track the orientations reachable at the requested position.
+
+```sh
+# Hardware-free Nero dry run from seven seed joint angles in degrees
+revobots-arm-nero-ik --seed_deg=0,20,0,60,0,10,0 --z=0.40 --dry_run
+
+# Read the connected SO-101's tool pose
+revobots-arm-so101-ik --preset so101 --print_pose
+```
+
+Nero's IK CLI defaults to `link7`. Use `--tip_link=gripper_tcp` for the nominal AGX grasp reference and supply a measured tool offset when needed. The planner checks reachability, joint limits, and joint motion limits. See [Nero IK](src/revobots_arm/inverse_kinematics/nero.py) and [SO-101 IK](src/revobots_arm/inverse_kinematics/so101.py).
+
+## Cameras, streaming, and depth
+
+```sh
+revobots-arm-cameras find
+revobots-arm-cameras --preset nero_gamepad test --cameras.eye.source=0
+revobots-arm-cameras --preset nero_gamepad preview --cameras.eye.source=0
+```
+
+Set `--cameras.<name>.source` to an OpenCV device index or path. For RealSense, use `--cameras.<name>.type=intelrealsense` with a serial number or unique device name. RealSense captures RGB and adds raw depth in millimetres when `use_depth=true`. Enable `publish_frames` for local consumers such as vision and policy inference.
+
+The same camera settings work for all the teleop recipes. Put them on the robot PC's `revobots-arm-teleop` command. Leave `--cameras=none` in place for a motion-only run, or replace it with one of these camera configurations.
+
+| Camera setup | Teleop flags |
+| --- | --- |
+| USB colour | `--cameras.eye.source=0` |
+| RealSense colour | `--cameras.wrist2D.type=intelrealsense --cameras.wrist2D.source=CAMERA_SERIAL` |
+| RealSense colour and depth | The RealSense colour flags plus `--cameras.wrist2D.use_depth=true` |
+| RTSP and depth telemetry | Enable depth, then add `--stream.enabled=true` and select a colour feed with `--stream.camera=eye` or `--stream.camera=wrist2D`. |
+
+```sh
+revobots-arm-teleop --preset nero_gamepad --robot.rest_on_start=false \
+  --cameras.eye.source=/dev/video0 \
+  --cameras.wrist2D.type=intelrealsense --cameras.wrist2D.source=CAMERA_SERIAL \
+  --cameras.wrist2D.use_depth=true \
+  --stream.enabled=true --stream.camera=eye --stream.port=8556
+```
+
+The example serves the `eye` colour feed at `rtsp://<robot-ip>:8556/ai`. With streaming enabled, the runtime can publish a **3 Hz distance reading** for each active RealSense depth feed. The reading is the median of valid pixels in an 11×11 patch at the centre of the **depth image**. Raw depth is unaligned to colour. The default destination is UDP `127.0.0.1:57110`. The standalone worker can publish with RTSP off. Run it on the camera-owning PC with a depth feed already publishing frames.
 
 ```sh
 revobots-arm-depth --camera wrist2D --robot-id XAVIER_PORTER_001
 ```
 
-The default destination is UDP `127.0.0.1:57110`. Automatic telemetry uses the
-arm's configured ID by default. For Porter, set `--stream.depth_robot_id` (or
-standalone `--robot-id`) to the **base's fleet identity**, enable
-`arm_depth_enabled`, and match `arm_depth_camera` to the camera name. The base's
-existing publisher sends the scalar result with its normal dashboard WebSocket
-and Azure IoT messages under the base identity. This worker needs no Azure keys
-and does not open a second fleet connection. Scout requires the equivalent
-scalar receiver/snapshot integration; the reference SCOUT-XT tree is unchanged.
+For Porter, use the **base's fleet ID** in `--stream.depth_robot_id` or `--robot-id` and match the base's `arm_depth_camera` with `arm_depth_enabled` turned on. A receiver on another PC needs `--stream.depth_host` or `--host` set to its private IP. Scout needs the corresponding base-side receiver. Keep the unauthenticated UDP telemetry on a private network. See the [depth worker](src/revobots_arm/telemetry/depth.py).
 
-The measurement is the median of valid pixels in an 11x11 **depth-image centre**
-patch. Zero and 65535 are excluded. The bus already contains millimetres, so no
-raw-device depth scale is applied again. The arm depth is unaligned: this is
-not a colour-crosshair measurement or a Euclidean range. Invalid samples clear
-the distance immediately; no advancing frames for 1.5 seconds makes it stale.
-New telemetry packets are sent at 3 Hz even when the bus is missing/stale, and
-old frames are skipped rather than queued. The worker reattaches after a bus
-restart. Colour/depth copies and resource contention still need target latency
-measurement; zero additional system load is not guaranteed.
+## Record, annotate, convert, and replay
 
-On different computers, the worker runs on the **camera-owning computer**
-(shared memory is local). Set `--stream.depth_host` (or standalone `--host`) to
-the base's private IPv4 address and
-configure the receiver's bind address/network access. Keep clocks synchronized;
-packets carry capture/sample timestamps. Do not expose the unauthenticated scalar
-UDP port to public networks. Each receiver accepts one configured camera/identity.
-
-Offline checks (synthetic arrays/shared memory; no cameras/cloud):
+In teleop, **Space** starts or stops a recording. **Left / R** redoes a take, and **Esc / Q** quits. Use any of the teleop recipes above and add `--run_dir ./runs/workbench` to choose where to save. For a continuous run, add `--record.continuous=true`. It starts when teleop is ready, ignores the manual recording keys, and finalizes at exit.
 
 ```sh
-PYTHONPATH=src python -m unittest discover -s tests -v
+# Press Space to start and stop each take
+revobots-arm-teleop --preset nero_gamepad --robot.rest_on_start=false \
+  --cameras.eye.source=0 --run_dir ./runs/takes
+
+# Record one continuous take, then exit before opening the annotator
+revobots-arm-teleop --preset nero_gamepad --robot.rest_on_start=false \
+  --cameras.eye.source=0 --record.continuous=true --run_dir ./runs/workbench
+
+# After the recording is finalized
+revobots-arm-episode-annotate ./runs/workbench --output ./runs/curated
 ```
 
-## Configuration
+Use `revobots-arm-record` with the same robot, input, and camera configuration for timed episode capture.
 
-Schemas: `src/revobots_arm/config/schema.py`.
-Presets: `src/revobots_arm/config/presets.py`.
+The local annotator accepts a run directory, a finalized `session_<n>` folder, or its `data.jsonl`. It binds to `127.0.0.1` and opens a browser with a per-launch URL token.
 
-Override settings with arguments such as `--robot.channel=can-nero`. For a deployment,
-pass `--deployment /path/to/robot.json`, containing dotted keys such as
-`{"robot.channel":"can-nero","fps":30}`. The environment variable
-`REVOBOTS_ARM_DEPLOYMENT` can also select that file. CLI values override deployment
-values, which override the preset.
-
-The `nero_gamepad` and `so101_gamepad` presets start at 1.5× jog speed. Set
-`--teleop.initial_speed_level=2` to start at 0.5×.
-
-The Nero gamepad preset maps left-stick horizontal motion to yaw and right-stick
-horizontal motion to sideways jog. Set `--teleop.swap_stick_x=false` to use the
-standard mapping.
-
-The Nero gamepad preset uses SocketCAN `can-nero`, firmware profile `v121`, startup
-rest positioning, X/Y/B pick/place/look poses, LB open and RB close. Saved-pose
-moves continue through controller dropout. Hardware behavior requires verification
-on the target robot before deployment.
-
-## Extend
-
-Register native driver config/class import paths with `robots.registry.robots`;
-register inputs with `teleoperators.registry.teleoperators`. Existing LeRobot types
-use LeRobot's registry. Add robot presets in `config/presets.py` and declare joint
-order, units and URDF links explicitly. Runtime orchestration remains shared.
-
-```text
-src/revobots_arm/
-  assets/               Runtime URDFs
-  config/               Schemas, presets, deployment and CLI loading
-  robots/               Drivers, contracts and registration
-  teleoperators/        Gamepad and leader inputs
-  cameras/              OpenCV, RealSense and observation management
-  streaming/            RTSP
-  transport/            UDP and shared-memory frame bus
-  inverse_kinematics/    Solver and robot profiles
-  recording/            Session I/O and dataset conversion
-  runtime/              Control, recording, replay and inference
-  utils/                Shared helpers
-```
-
-Robot-specific integration modules are explicit:
-
-```text
-robots/koch/follower.py
-robots/so101/follower.py
-robots/nero/driver.py       # native Nero control
-robots/nero/follower.py     # LeRobot retargeting follower
-teleoperators/leader/koch.py
-teleoperators/leader/so101.py
-```
-
-Koch and SO101 modules delegate calibration and motor I/O to LeRobot. Each leader
-module exposes local and remote adapters; the shared leader client routes through
-these modules. SO101 supports both combined (`so_follower`/`so_leader`) and separate
-(`so101_follower`/`so101_leader`) LeRobot package layouts. The direct joint-copy
-remote mode uses the corresponding LeRobot remote leader extension.
-
-## Leader-to-follower Cartesian IK
-
-Enable with `--ik=true` (also `--ik.enabled=true`). Leader joint angles go through
-leader FK, and the change in tool pose goes through follower IK. The first
-paired reading anchors both tools at their current poses. Nero uses the native
-seven-joint driver in this mode and skips the startup rest move. The same
-solver can use all seven joints, and the motion it chooses depends on the target
-pose. The gripper holds its measured setting when the follower exposes one.
-
-For a local SO-101 leader driving Nero:
+1. Pick the camera or enable the all-camera view. Use the timeline to scrub, **Left / Right** to step, or **K** to play or pause.
+2. Press **Space** at the start and the last frame to keep, or use the on-screen mark button. Adjust the range and task label in the episode list.
+3. Choose **Export sessions** to write the selected ranges to a new directory while preserving the originals. **Export + convert to LeRobot** also builds a local dataset.
 
 ```sh
-revobots-arm-teleop --preset nero --ik=true \
-  --teleop.type=so101_leader --teleop.port=/dev/ttyACM1 --teleop.id=aadi_so101_leader
+# Convert the directory printed by the episode exporter
+revobots-arm-convert --sessions_dir /path/to/exported-run \
+  --dataset.repo_id=your-org/workbench
+
+# Replay with the same follower and action schema used while recording
+revobots-arm-replay --preset nero_gamepad --robot.rest_on_start=false \
+  --session_dir ./runs/workbench/session_0
+
+# Replay a converted LeRobot episode
+revobots-arm-replay --preset nero_gamepad --robot.rest_on_start=false \
+  --dataset.repo_id=your-org/workbench --dataset.episode=0
 ```
 
-For a remote SO-101 leader, run the following on the follower and leader PCs,
-respectively. Use the follower PC's IP and the leader's calibration ID:
+To replay a LeRobot episode, pass `--dataset.repo_id` and `--dataset.episode` in place of `--session_dir`. The converter saves locally by default and uploads only when `--dataset.push_to_hub=true` is set. Match joint names, units, and camera keys across recording, conversion, replay, and inference.
+
+## Run policy inference
+
+Start teleop with the AI link enabled and run inference on the same PC so it can read the shared-memory camera feeds. This example assumes a checkpoint trained with native Nero gamepad actions and an `eye` camera. Replace both configurations with the robot and camera keys from your dataset if they differ. In particular, the mapped Nero joint schema and the native seven-joint schema use different action keys.
 
 ```sh
-revobots-arm-teleop --preset nero --ik=true --teleop.type=so101_leader_remote --teleop.port=5002
-revobots-arm-leader-client --preset nero --ik=true --teleop.type=so101_leader_remote \
-  --ip 192.168.1.20 --port 5002 --com /dev/ttyACM1 --id aadi_so101_leader
+# Terminal 1
+revobots-arm-teleop --preset nero_gamepad --robot.rest_on_start=false \
+  --cameras.eye.source=0 --ai.enabled=true
+
+# Terminal 2
+revobots-arm-inference --preset nero_gamepad --cameras.eye.source=0 \
+  --policy.path=./outputs/checkpoint/pretrained_model \
+  --dataset_repo_id=your-org/workbench
 ```
 
-Koch v1.1 has a bundled URDF with the jaw pivot as the tool point. For a local
-Koch leader driving Nero:
+Teleop owns the hardware and passes state and actions over UDP. Press **A** in teleop to give the policy control. Press **A** again to take it back. On a leader setup configured for human takeover, moving the leader also returns control. The AI link defaults to loopback and uses ports `5010` for actions and `5011` for state.
+
+## Vision detection
+
+Run a detector on an image, a live colour camera, or a finalized recording. The output is JSONL with detection boxes in original-image pixels. YOLO can also produce segmentation outlines and track IDs with a compatible model and tracker.
 
 ```sh
-revobots-arm-teleop --preset nero --ik=true \
-  --teleop.type=koch_leader --teleop.port=/dev/ttyACM0 --teleop.id=rahul \
-  --ik.leader_calibration=rahul
+revobots-arm-vision yolo --image sample.jpg \
+  --model /path/to/checkpoint.pt --annotated boxes.jpg
+
+revobots-arm-vision yolo --camera wrist2D --follow \
+  --model /path/to/checkpoint.pt --tracker bytetrack.yaml --max-fps 10
 ```
 
-For remote Koch, use the updated package on both PCs. Run these commands on
-the Nero and leader PCs respectively:
+For a recording, add `--session /path/to/session_0` to the camera command. For text-prompt detection, use `revobots-arm-vision gemini` with `--model` and `--prompt`, and set `GEMINI_API_KEY` or `GOOGLE_API_KEY`. Gemini sends the processed images to Google.
+
+Teleop can launch vision as a child process. Put `--vision` and the detector arguments last. With continuous recording, the default output is `vision.jsonl` in the run directory. Use `--vision-output` before `--vision` to set a different file.
+
+## Nero wrist hand–eye calibration
+
+The calibrator reads a finalized native Nero recording and saves colour intrinsics and the fixed camera-to-`link7` transform. It works offline on the recording.
 
 ```sh
-revobots-arm-teleop --preset nero --ik=true
-revobots-arm-leader-client --preset nero --ik=true --ik.leader_calibration=rahul \
-  --ip 192.168.1.20 --port 5001 --com /dev/ttyACM0 --id rahul
+revobots-arm-hand-eye board --output charuco.png
+revobots-arm-hand-eye calibrate --session ./runs/calibration/session_0 \
+  --camera wrist2D --square-mm 35 --marker-mm 26 --output ./nero_wrist.json
 ```
 
-Use `--ik.leader_calibration=rahul` for that measured leader. For a different
-Koch calibration, configure the joint zeros and directions on the leader PC.
-The client applies those settings and sends calibrated URDF joint degrees.
-Koch-to-Nero uses the nominal Nero gripper tip, aligns the two starting tool
-headings, and defaults to 2.75× XYZ displacement. This mode anchors to current
-feedback and sends targets through the regular Nero driver.
+Print the ChArUco board and measure the printed squares and markers. Keep the board and robot base stationary while recording 12–20 wrist views with measured feedback from all seven joints. Vary the wrist angle around at least two axes, the distance, and the position of the board in the image. Hold each view for about a second. The tool selects settled views and reports reprojection and board-pose errors.
 
-For other rotary serial arms, supply the relevant `--ik.leader_urdf` or
-`--ik.follower_urdf` and `*_tip_link`. Specify `*_base_link` if the chain starts
-below the URDF root. If the driver labels differ from the URDF joint names,
-set `*_motors` to the driver names in base-to-tip order. `*_invert_joints` and
-`*_joint_offsets_deg` align each arm's joint feedback with its own URDF. For a
-remote leader, pass the `leader_*` direction and offset settings to
-`revobots-arm-leader-client`. A custom driver must use calibrated degrees for
-arm joints.
+Use the calibration with the same camera mount and image geometry. To map a detection pixel into robot coordinates, `pixel_to_base()` needs depth aligned to colour and the wrist pose at image capture. The current RealSense feed supplies unaligned depth. A complete camera-guided pick also needs a grasp pose and a motion sequence.
 
-Other pairs default to aligned base frames and 1:1 translation. Set
-`--ik.frame_rpy_deg=0,0,0` to select aligned axes explicitly, or use
-`--ik.frame_rpy_deg=0,0,180` when a 180° base rotation is needed. Set
-`--ik.position_scale=0.5` for half-size motions. `--ik.orientation_weight=0`
-follows XYZ only. For continuous data
-capture, add `--record.continuous=true` to the teleop command.
-
-### Nero wrist priority
-
-Wrist priority is off by default. Enable it with `--teleop.wrist_priority=true`
-for `nero_gamepad` or `--ik.wrist_priority=true` with `--ik=true` for leader
-teleop. It favors joints 5–7 for orientation corrections while preserving the
-position task at the selected tool point. For gamepad motion around the nominal
-grasp point, set `--teleop.tip_link=gripper_tcp`.
-
-## Continuous recording and episode annotation
-
-Record immediately after teleoperation becomes ready, without pressing Space:
+## Machine info and diagnostics
 
 ```sh
-revobots-arm-teleop --preset nero_gamepad --record.continuous=true --run_dir /path/to/continuous_run
+# Inspect the local host without connecting to an arm
+revobots-arm-info --preset nero_gamepad
+
+# Check installed Python dependencies
+revobots-arm-test
+
+# Open a read-only native Nero feedback connection. Stop teleop and replay first.
+revobots-arm-test --preset nero_gamepad --robot --seconds 2
+
+# Read a local SO-101 leader's serial bus directly. Leave the port free.
+revobots-arm-test --preset so101 --leader --teleop.port=/dev/ttyACM1
+
+# While the camera owner runs, check colour and depth frame rate, format, and age
+revobots-arm-test --camera wrist2D --camera wrist2D_depth --seconds 3
+
+# With the teleop UDP receiver stopped, verify that input packets reach the robot PC
+revobots-arm-test --udp-port 5001 --seconds 5
 ```
 
-In continuous mode Space and redo are ignored. Esc/q or Ctrl-C finalizes the capture.
-Every recorded control tick includes observations and camera/depth frames. During
-controller dropout, the recorded action is the measured hold pose and `command_sent`
-is false; no new robot command is transmitted. Timestamps retain actual capture timing,
-while preview playback uses the session's nominal FPS, as the existing format does.
+`revobots-arm-info` reports the machine, Python environment, configured robot and input endpoints, detected serial ports and cameras, Linux CAN interfaces, and local Tailscale addresses. Detected ports are device candidates. Pass `--robot` or `--leader` to verify that a supported device responds with readable positions. These probes leave joint targets and torque settings alone. A native Nero probe reads the seven arm joints. Serial Koch and SO probes report raw encoder counts. [Tailscale CLI reference](https://tailscale.com/docs/reference/tailscale-cli#ip)
 
-After the recording is finalized:
+The test command reports median, p95, and maximum where it has timing samples. Motor read time measures the driver call. Camera age uses the frame bus timestamp on the same host. UDP reports packet counts and time **between arrivals**, which helps diagnose delivery gaps. Both commands accept `--json`. The shorter aliases `revobot-arm-info` and `revobot-arm-test` also work.
+
+## Development
+
+Core code lives under [`src/revobots_arm`](src/revobots_arm). Register new robot and input adapters in the [robot registry](src/revobots_arm/robots/registry.py) and [teleoperator registry](src/revobots_arm/teleoperators/registry.py). For Cartesian control, specify the URDF, base and tip links, joint order, and the mapping from calibrated motor readings to URDF joints. The [CLI entry points](pyproject.toml) list all installed commands, and each accepts `--help`.
+
+Run the hardware-free tests with the base package installed.
 
 ```sh
-revobots-arm-episode-annotate /path/to/continuous_run
-# A single session folder or its data.jsonl path also works.
-revobots-arm-episode-annotate /path/to/continuous_run/session_0 --output /path/to/curated --port 8765
+python -m unittest discover -s tests -v
 ```
-
-The CLI opens a local browser dashboard. Use `--no-browser` to open its printed URL
-manually, or `--port 0` to choose a free port. It binds only to 127.0.0.1 and requires
-the per-launch token in that URL. No account or additional web framework is needed.
-
-- Drag/click the timeline to scrub. Left/right step a frame; Shift + arrows jump one second.
-- Space marks start, then the last included frame; the on-screen button does the same.
-- K or Play toggles playback. Esc cancels an unfinished mark.
-- Select a camera or enable all-camera preview; depth is colorized only for display.
-- Edit episode boundaries and task labels; changes autosave to `annotations.json` beside
-  the source metadata (in the run folder when opened as a run). Undo reverses edits.
-  Overlapping ranges are rejected. Export waits for pending edits to save.
-- **Export sessions** writes a new directory containing `session_0`, `session_1`, etc.
-  Sources stay intact. Every camera is exported; depth maps are copied losslessly.
-  Color videos are decoded/re-encoded as MP4. Rows retain source frame indices and
-  timestamps; episode-local indices start at zero. Internal ranges are [start, end).
-- **Export + convert to LeRobot** calls the existing converter with the entered dataset
-  ID, saving a local dataset. It requires the compatible LeRobot environment. It never
-  uploads to Hugging Face. Conversion failure leaves the exported sessions available.
-
-By default, exports go into a sibling `<source>_annotated` directory, with a new
-unique subdirectory per export. You can also convert exported sessions separately:
-
-```sh
-revobots-arm-convert --sessions_dir /path/to/exported/session_directory --dataset.repo_id=username/dataset-name
-```
-
-Opening a recording validates metadata/video/depth frame counts. Finish recording
-before annotation; modified sources are rejected rather than silently reusing old marks.
-
-Annotation exports use `session_<YYYYmmdd_HHMMSS>_<suffix>/`, containing the selected
-`session_0/`, `session_1/`, etc. Continuous teleoperation prints a ready-to-run
-`revobots-arm-episode-annotate "<saved-session-path>"` command after saving.

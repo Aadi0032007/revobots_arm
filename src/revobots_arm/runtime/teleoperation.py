@@ -34,11 +34,12 @@ the leader more than ``ai.human_takeover_threshold`` hands control straight back
 from __future__ import annotations
 
 
+from argparse import REMAINDER
 import logging
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from revobots_arm.transport.ai_link import UdpJsonListener, UdpJsonSender
 from revobots_arm.cameras.manager import CamerasManager, RobotWithCameras
@@ -55,10 +56,13 @@ from revobots_arm.config.devices import (
 from revobots_arm.recording.session import (
     SessionWriter,
     latest_run_dir,
-    new_run_dir,
+    new_run_path,
     next_session_dir,
 )
 from revobots_arm.robots.nero.driver import NeroTrackingError
+
+if TYPE_CHECKING:
+    from revobots_arm.vision.launch import VisionProcess
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,8 @@ def teleop_and_record(
     cfg: ArmConfig,
     run_dir: Path,
     teleop_time_s: float | None = None,
+    *,
+    vision: VisionProcess | None = None,
 ) -> list[Path]:
     from lerobot.processor import make_default_processors
     from lerobot.utils.constants import ACTION, OBS_STR
@@ -166,7 +172,6 @@ def teleop_and_record(
         "camera_backends": {n: c.backend for n, c in cameras.captures.items()},
     }
 
-    logging.info("Run directory: %s", run_dir)
     logging.info(
         "Features: %s",
         {k: (v["dtype"], tuple(v["shape"])) for k, v in features.items()},
@@ -208,6 +213,7 @@ def teleop_and_record(
             meta={**base_meta, "session_name": session_dir.name},
             codec=rec.codec,
         )
+        logging.info("Recording to %s", session_dir)
         log_say(f"Recording {session_dir.name}", play_sounds)
 
     def stop_session() -> None:
@@ -292,6 +298,8 @@ def teleop_and_record(
         log_say("Teleop ready. " + controls_help, play_sounds)
         if rec.continuous:
             start_session()
+        if vision is not None:
+            vision.start()
         t_start = time.perf_counter()
 
         while not events["stop"]:
@@ -496,7 +504,7 @@ def teleop_and_record(
 
 
 def resolve_run_dir(cfg: ArmConfig, run_dir: str | None, resume: bool) -> Path:
-    """``--run_dir`` wins; ``--resume`` appends to the latest run; otherwise a new run folder."""
+    """Resolve the recording path without creating any directories."""
     if run_dir:
         return Path(run_dir).expanduser()
     if resume:
@@ -508,7 +516,7 @@ def resolve_run_dir(cfg: ArmConfig, run_dir: str | None, resume: bool) -> Path:
             "--resume given but no previous run under %s; starting a new one",
             cfg.sessions_root,
         )
-    return new_run_dir(cfg.sessions_root)
+    return new_run_path(cfg.sessions_root)
 
 
 def main() -> None:
@@ -525,7 +533,21 @@ def main() -> None:
         default=None,
         help="Stop after this many seconds (default: until Esc)",
     )
+    parser.add_argument(
+        "--vision-output", type=Path,
+        help="Vision JSON output. Defaults to the continuous recording run or the current directory.",
+    )
+    parser.add_argument(
+        "--vision", nargs=REMAINDER, metavar="ARG",
+        help="Launch revobots-arm-vision with these arguments. Put --vision and its arguments last.",
+    )
     args, overrides = parser.parse_known_args()
+    if args.vision is not None:
+        from revobots_arm.vision.cli import parse_args as parse_vision_args
+
+        parse_vision_args(args.vision)
+    elif args.vision_output is not None:
+        parser.error("--vision-output requires --vision")
 
     cfg = load_config(args.preset, overrides, deployment=args.deployment)
 
@@ -535,12 +557,30 @@ def main() -> None:
     logging.info("\n%s", describe(cfg))
 
     run_dir = resolve_run_dir(cfg, args.run_dir, args.resume)
-    saved = teleop_and_record(cfg, run_dir=run_dir, teleop_time_s=args.teleop_time_s)
+    vision = None
+    if args.vision is not None:
+        from revobots_arm.vision.launch import VisionProcess
+
+        default_output = (
+            run_dir / "vision.jsonl" if cfg.record.continuous else Path(f"vision-{run_dir.name}.jsonl")
+        )
+        vision = VisionProcess(args.vision, args.vision_output or default_output)
+    try:
+        saved = teleop_and_record(
+            cfg, run_dir=run_dir, teleop_time_s=args.teleop_time_s, vision=vision
+        )
+    finally:
+        if vision is not None:
+            vision.stop()
+
+    if not saved:
+        print("\nNo recordings saved.")
+        return
 
     print(f"\n{len(saved)} session(s) saved under {run_dir}")
-    if saved and cfg.record.continuous:
+    if cfg.record.continuous:
         print(f'Next: revobots-arm-episode-annotate "{saved[-1].resolve()}"')
-    elif saved:
+    else:
         print(
             f'Next: revobots-arm-convert --sessions_dir "{run_dir}" --dataset.repo_id={cfg.dataset.repo_id}'
         )

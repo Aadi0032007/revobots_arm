@@ -12,6 +12,8 @@ dependencies = ["numpy>=1.24", "opencv-python>=4.8"]
 [project.optional-dependencies]
 gamepad = ["pygame>=2.5"]
 realsense = ["pyrealsense2>=2.54; platform_system != 'Darwin'"]
+vision-yolo = ["ultralytics>=8.3", "lap>=0.5.12"]
+vision-gemini = ["google-genai>=1.68"]
 
 [project.scripts]
 revobots-arm-teleop = "revobots_arm.runtime.teleoperation:main"
@@ -27,6 +29,12 @@ revobots-arm-nero-ik = "revobots_arm.inverse_kinematics.nero:main"
 revobots-arm-so101-ik = "revobots_arm.inverse_kinematics.so101:main"
 revobots-arm-episode-annotate = "revobots_arm.annotation.server:main"
 revobots-arm-depth = "revobots_arm.telemetry.depth:main"
+revobots-arm-info = "revobots_arm.diagnostics:info_main"
+revobots-arm-test = "revobots_arm.diagnostics:test_main"
+revobot-arm-info = "revobots_arm.diagnostics:info_main"
+revobot-arm-test = "revobots_arm.diagnostics:test_main"
+revobots-arm-hand-eye = "revobots_arm.hand_eye.cli:main"
+revobots-arm-vision = "revobots_arm.vision.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

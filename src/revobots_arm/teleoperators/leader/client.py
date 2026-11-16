@@ -122,9 +122,12 @@ def main() -> None:
     elif teleop_type in SO_REMOTE_TYPES:
         from revobots_arm.teleoperators.leader.so101 import run_remote_client
 
+        is_follower_nero = cfg.robot_type == "agx_nero_follower"
         use_degrees = bool(
             args.use_degrees if args.use_degrees is not None else lc.use_degrees
         )
+        if is_follower_nero and not use_degrees:
+            parser.error("SO leader joint mapping to Nero requires degrees.")
         logging.info(
             "SO-101 leader client: %s -> %s:%s at %s fps (id=%s, use_degrees=%s)",
             com,
@@ -141,6 +144,7 @@ def main() -> None:
             robot_id=arm_id,
             fps=fps,
             use_degrees=use_degrees,
+            **({"is_follower_nero": True} if is_follower_nero else {}),
         )
     else:
         raise SystemExit(

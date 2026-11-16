@@ -97,13 +97,11 @@ class _RawDepthWriter:
 # ---------------------------------------------------------------------------
 
 
-def new_run_dir(sessions_root: Path) -> Path:
-    """``<sessions_root>/<YYYYmmdd_HHMMSS>`` (mirrors the AGV ``split_session_<datetime>`` idea)."""
-    run_dir = Path(sessions_root).expanduser() / datetime.now().strftime(
+def new_run_path(sessions_root: Path) -> Path:
+    """Choose a timestamped recording path. The session writer creates it."""
+    return Path(sessions_root).expanduser() / datetime.now().strftime(
         "%Y%m%d_%H%M%S"
     )
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir
 
 
 def latest_run_dir(sessions_root: Path) -> Path | None:

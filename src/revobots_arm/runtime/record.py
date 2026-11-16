@@ -74,8 +74,6 @@ def record(cfg: ArmConfig, run_dir: Path) -> list[Path]:
         "task": task,
         "preset": cfg.name,
     }
-    logging.info("Run directory: %s", run_dir)
-
     if rec.display_data:
         init_visualization(
             rec.display_mode,
@@ -105,6 +103,7 @@ def record(cfg: ArmConfig, run_dir: Path) -> list[Path]:
                 meta={**base_meta, "session_name": session_dir.name},
                 codec=rec.codec,
             )
+            logging.info("Recording to %s", session_dir)
             log_say(f"Recording {session_dir.name}", play_sounds)
             try:
                 record_loop(
@@ -193,11 +192,13 @@ def main() -> None:
     run_dir = resolve_run_dir(cfg, args.run_dir, args.resume)
     saved = record(cfg, run_dir=run_dir)
 
-    print(f"\n{len(saved)} session(s) saved under {run_dir}")
     if saved:
+        print(f"\n{len(saved)} session(s) saved under {run_dir}")
         print(
             f'Next: python -m revobots_arm.recording.conversion --sessions_dir "{run_dir}" --dataset.repo_id={cfg.dataset.repo_id}'
         )
+    else:
+        print("\nNo recordings saved.")
 
 
 if __name__ == "__main__":

@@ -145,8 +145,10 @@ def load_config(
     preset: str | None = None,
     overrides: list[str] | dict[str, str] | None = None,
     deployment: str | None = None,
+    *,
+    require_lerobot: bool = True,
 ) -> ArmConfig:
-    """Pick a preset from ``config.py``, apply CLI overrides, make sure ``lerobot`` is importable.
+    """Pick a preset, apply overrides, and resolve LeRobot when requested.
 
     ``overrides`` is the unknown-args list from ``parser.parse_known_args()`` (or an
     already parsed ``{"robot.port": "COM4"}`` dict).
@@ -177,7 +179,8 @@ def load_config(
         raise ValueError("fps must be positive")
     if cfg.ik.enabled:
         configure_ik_follower(cfg)
-    ensure_lerobot_importable(cfg.lerobot_src)
+    if require_lerobot:
+        ensure_lerobot_importable(cfg.lerobot_src)
     return cfg
 
 

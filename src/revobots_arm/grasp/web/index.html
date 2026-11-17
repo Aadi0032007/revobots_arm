@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nero · Hover and grasp</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header>
+    <div><span class="robot">Nero</span><h1>Hover and grasp</h1></div>
+    <div class="header-actions"><span id="mode">Connecting</span><button id="stop" class="stop" disabled>Stop</button></div>
+  </header>
+  <main>
+    <section class="viewer" aria-labelledby="camera-heading">
+      <div class="feed-heading">
+        <h2 id="camera-heading">Wrist camera</h2>
+        <button id="clear" disabled>Clear target</button>
+      </div>
+      <div class="feed">
+        <canvas id="frame" width="640" height="480" tabindex="0" aria-label="Wrist camera target selector. Click the object or use the arrow keys and Enter."></canvas>
+        <p id="frame-status" aria-live="polite">Waiting for camera</p>
+      </div>
+    </section>
+    <aside aria-label="Motion controls">
+      <h2>Target in robot base</h2>
+      <output id="target">Select a point on the image</output>
+      <div class="fields">
+        <label>Hover height <small>mm</small><input id="hover" type="number" value="100" min="20" max="300" step="1"></label>
+        <label>Grasp depth <small>mm</small><input id="depth" type="number" value="20" min="0" max="100" step="1"></label>
+        <label>Gripper yaw <small>°</small><input id="yaw" type="number" value="0" min="-180" max="180" step="1"></label>
+      </div>
+      <div class="actions">
+        <button id="plan-hover" disabled>Preview hover</button>
+        <button id="plan-grasp" disabled>Preview grasp</button>
+      </div>
+      <section class="result" aria-labelledby="plan-heading">
+        <h2 id="plan-heading">Motion plan</h2>
+        <p id="status" role="status">Connecting to the local console…</p>
+        <p id="error" role="alert" hidden></p>
+        <dl id="poses" hidden></dl>
+        <ol id="steps" hidden></ol>
+        <button id="confirm" class="primary" disabled>Execute plan</button>
+      </section>
+    </aside>
+  </main>
+</body>
+</html>

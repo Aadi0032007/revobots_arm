@@ -73,6 +73,7 @@ def record(cfg: ArmConfig, run_dir: Path) -> list[Path]:
         "teleop_type": cfg.teleop_type,
         "task": task,
         "preset": cfg.name,
+        "camera_calibration": cameras.calibration_metadata(),
     }
     if rec.display_data:
         init_visualization(

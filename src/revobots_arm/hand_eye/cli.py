@@ -27,6 +27,21 @@ def make_board(square_mm: float, marker_mm: float):
     return aruco.CharucoBoard((7, 5), square_mm / 1000, marker_mm / 1000, dictionary)
 
 
+def board_png(board) -> bytes:
+    image = board.generateImage((2180, 1580), marginSize=40)
+    ok, png = cv2.imencode(".png", image)
+    if not ok:
+        raise ValueError("Could not encode the calibration board")
+    return png.tobytes()
+
+
+def detect_view(gray, board, detector):
+    corners, ids, _, _ = detector.detectBoard(gray)
+    if ids is None or len(ids) < 8 or board.checkCharucoCornersCollinear(ids):
+        return None
+    return board.getChessboardCorners()[ids.ravel()], corners
+
+
 def collect_views(session: SessionFrames, camera: str, board, kin):
     try:
         times = np.array([float(row["timestamp"]) for row in session.rows])
@@ -37,7 +52,6 @@ def collect_views(session: SessionFrames, camera: str, board, kin):
         raise ValueError("Expected increasing timestamps and finite measured joint angles")
 
     detector = cv2.aruco.CharucoDetector(board)
-    chess_corners = board.getChessboardCorners()
     accepted_joints = []
     views = []
     # Joint feedback and video frames are paired by the recorder. Use settled
@@ -56,17 +70,13 @@ def collect_views(session: SessionFrames, camera: str, board, kin):
             if any(np.max(np.abs(q - previous)) < np.radians(2) for previous in accepted_joints):
                 continue
             gray = cv2.cvtColor(images[camera], cv2.COLOR_RGB2GRAY)
-            corners, ids, _, _ = detector.detectBoard(gray)
-            if ids is None or len(ids) < 8 or board.checkCharucoCornersCollinear(ids):
+            detected = detect_view(gray, board, detector)
+            if detected is None:
                 continue
             image_size = gray.shape[::-1]
             accepted_joints.append(q)
-            views.append((row["frame_index"], kin.fk(q), chess_corners[ids.ravel()], corners))
+            views.append((row["frame_index"], kin.fk(q), *detected))
 
-    if len(views) < 6:
-        raise ValueError(f"Found {len(views)} settled board views. Need at least six distinct views.")
-    if len(views) > 40:
-        views = [views[i] for i in np.linspace(0, len(views) - 1, 40, dtype=int)]
     return views, image_size
 
 
@@ -75,8 +85,17 @@ def calibrate(session_dir: Path, camera: str, board) -> HandEyeCalibration:
     camera_info = session.meta.get("cameras", {}).get(camera)
     if camera_info is None or "depth" in camera_info:
         raise ValueError(f"Expected a recorded colour camera. Available channels: {session.camera_keys}")
+    camera_calibration = session.meta.get("camera_calibration", {}).get(camera, {})
     kin = nero_kinematics()
     views, image_size = collect_views(session, camera, board, kin)
+    return solve_views(views, image_size, board, kin, camera, session.meta.get("robot_id"), camera_calibration)
+
+
+def solve_views(views, image_size, board, kin, camera, robot_id, camera_calibration):
+    if len(views) < 6:
+        raise ValueError(f"Found {len(views)} settled board views. Need at least six distinct views.")
+    if len(views) > 40:
+        views = [views[i] for i in np.linspace(0, len(views) - 1, 40, dtype=int)]
     indices, links, objects, pixels = zip(*views)
     reprojection, K, D, rotations, translations = cv2.calibrateCamera(
         list(objects), list(pixels), image_size, None, None
@@ -93,7 +112,7 @@ def calibrate(session_dir: Path, camera: str, board) -> HandEyeCalibration:
         raise ValueError("Calibration residuals exceed 1 px, 10 mm or 2°. Check board scale, camera and settled views.")
     return HandEyeCalibration(
         camera=camera,
-        robot_id=session.meta.get("robot_id"),
+        robot_id=robot_id,
         base_link=kin.chain.base_link,
         camera_link=kin.chain.tip_link,
         image_size_wh=image_size,
@@ -106,7 +125,23 @@ def calibrate(session_dir: Path, camera: str, board) -> HandEyeCalibration:
         reprojection_rms_px=float(reprojection),
         board_translation_rms_mm=board_mm,
         board_rotation_rms_deg=board_deg,
+        camera_serial=camera_calibration.get("serial"),
+        image_rotation=camera_calibration.get("rotation"),
     )
+
+
+def save_calibration(calibration, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with NamedTemporaryFile("w", encoding="utf-8", dir=output.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(asdict(calibration), stream, indent=2, allow_nan=False)
+            stream.write("\n")
+        temporary.replace(output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -128,24 +163,11 @@ def main() -> None:
         if args.command == "board":
             if output.suffix.lower() != ".png":
                 raise ValueError("Board output must use a .png extension")
-            image = board.generateImage((2180, 1580), marginSize=40)
-            ok, png = cv2.imencode(".png", image)
-            if not ok:
-                raise ValueError("Could not encode the calibration board")
-            output.write_bytes(png.tobytes())
+            output.write_bytes(board_png(board))
             print(f"Saved {output}. Measure a printed square and marker before calibrating.")
         else:
             calibration = calibrate(args.session.expanduser(), args.camera, board)
-            temporary = None
-            try:
-                with NamedTemporaryFile("w", encoding="utf-8", dir=output.parent, delete=False) as stream:
-                    temporary = Path(stream.name)
-                    json.dump(asdict(calibration), stream, indent=2, allow_nan=False)
-                    stream.write("\n")
-                temporary.replace(output)
-            finally:
-                if temporary is not None:
-                    temporary.unlink(missing_ok=True)
+            save_calibration(calibration, output)
             print(f"Saved {output}")
     except (ValueError, RuntimeError, OSError, cv2.error) as exc:
         parser.exit(1, f"Hand-eye calibration: {exc}\n")

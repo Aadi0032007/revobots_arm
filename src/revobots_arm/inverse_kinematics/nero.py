@@ -153,12 +153,12 @@ def plan_cartesian(
     q = np.asarray(q0, dtype=float).copy()
     target = np.asarray(target, dtype=float)
     if (
-        q.shape != (7,)
+        q.shape != (kin.chain.n,)
         or not np.all(np.isfinite(q))
         or target.shape != (4, 4)
         or not np.all(np.isfinite(target))
     ):
-        raise ValueError("Expected seven finite joints and a finite 4x4 target")
+        raise ValueError(f"Expected {kin.chain.n} finite joints and a finite 4x4 target")
     lo, hi = kin.chain.lower + kin.limit_margin, kin.chain.upper - kin.limit_margin
     if np.any(q < lo) or np.any(q > hi):
         raise ValueError(

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Revobots Arm Control</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark" aria-hidden="true">R</span><span>Revobots <strong>Arm Control</strong></span></div>
+    <div class="top-state"><span id="mode" class="pill">Local</span><span id="connection" class="connection">Disconnected</span><button type="button" class="stop" id="stop" disabled>Stop motion</button></div>
+  </header>
+  <div class="workspace">
+    <nav aria-label="Arm control">
+      <button data-tab="setup" aria-current="page">Setup</button>
+      <button data-tab="joints">Joints</button>
+      <button data-tab="pose">Tool pose</button>
+      <button data-tab="teleop">Teleop</button>
+      <button data-tab="pick">Hover and grasp</button>
+      <button data-tab="eye">Hand–eye</button>
+      <button data-tab="policy">Policy</button>
+    </nav>
+    <div id="message" class="message" role="status">Loading local console…</div>
+    <div class="layout">
+      <main>
+        <section id="setup" class="panel">
+          <h1>Setup</h1>
+          <form id="setup-form">
+            <div class="grid profile">
+              <label>Preset<select id="preset"></select></label>
+              <label>Control rate (Hz)<input id="fps" type="number" min="10" max="60" required></label>
+            </div>
+            <fieldset><legend>Follower</legend>
+              <label>Robot<select id="follower"><option value="agx_nero_native">Nero · native</option><option value="agx_nero_follower">Nero · mapped joints</option><option value="so101_follower">SO-101</option><option value="so100_follower">SO-100</option><option value="koch_follower">Koch</option></select></label>
+              <div id="robot-fields" class="grid"></div>
+            </fieldset>
+            <fieldset><legend>Input</legend>
+              <label>Control source<select id="input"><option value="manual">Browser controls</option><option value="gamepad_ee">Gamepad</option><optgroup label="Local leader"><option value="so101_leader">SO-101 · serial</option><option value="so100_leader">SO-100 · serial</option><option value="koch_leader">Koch · serial</option></optgroup><optgroup label="Remote leader"><option value="so101_leader_remote">SO-101 · UDP</option><option value="so100_leader_remote">SO-100 · UDP</option><option value="koch_leader_remote">Koch · UDP</option></optgroup></select></label>
+              <div id="input-fields" class="grid"></div>
+              <p id="input-hint" class="muted"></p>
+            </fieldset>
+            <fieldset><legend>Cameras</legend>
+              <div id="camera-fields"></div>
+              <button type="button" id="add-camera">Add camera</button>
+              <label>Grasp camera<select id="wrist"><option value="">None</option></select></label>
+              <p class="muted">Select a wrist-mounted RealSense with depth for Hover and grasp.</p>
+            </fieldset>
+            <details><summary>Advanced driver settings</summary>
+              <label>Driver configuration (JSON)<textarea id="advanced" spellcheck="false" rows="9"></textarea></label>
+              <button id="apply-advanced" type="button">Apply driver settings</button>
+            </details>
+            <div class="actions"><button class="primary" id="connect">Connect</button><button type="button" id="disconnect" disabled>Disconnect</button></div>
+          </form>
+        </section>
+        <section id="joints" class="panel" hidden>
+          <h1>Joints</h1>
+          <p class="muted">Enter targets for the joints you want to move. Empty fields hold their current position.</p>
+          <form id="joints-form">
+            <div id="joint-fields"></div>
+            <button class="primary" id="preview-joints" disabled>Preview joint move</button>
+          </form>
+          <div id="joints-preview" class="result" hidden></div>
+        </section>
+        <section id="pose" class="panel" hidden>
+          <h1>Tool pose</h1>
+          <p id="pose-base" class="muted">Connect a follower with Cartesian IK.</p>
+          <form id="pose-form">
+            <div class="grid three" id="xyz">
+              <label>X (mm)<input type="number" step="any" required></label>
+              <label>Y (mm)<input type="number" step="any" required></label>
+              <label>Z (mm)<input type="number" step="any" required></label>
+            </div>
+            <div class="grid three" id="rpy" hidden>
+              <label>Roll (°)<input type="number" step="any" required></label>
+              <label>Pitch (°)<input type="number" step="any" required></label>
+              <label>Yaw (°)<input type="number" step="any" required></label>
+            </div>
+            <div class="actions"><button class="primary" id="preview-pose" disabled>Preview tool move</button><button type="button" id="copy-pose" disabled>Use measured pose</button></div>
+          </form>
+          <div id="pose-preview" class="result" hidden></div>
+        </section>
+        <section id="teleop" class="panel" hidden>
+          <h1>Teleop</h1>
+          <p id="teleop-status" class="muted">Connect a follower and select a leader or gamepad in Setup.</p>
+          <button type="button" id="start-teleop" class="primary" disabled>Start teleop</button>
+        </section>
+        <section id="pick" class="panel" hidden>
+          <h1>Hover and grasp</h1>
+          <details id="grasp-settings" open><summary>Camera calibration and tool</summary>
+            <p class="muted">Connect native Nero and select the wrist RealSense in Setup. Measure the grasp point from <code>gripper_base</code> and the table height from the robot base.</p>
+            <form id="grasp-form">
+              <label>Hand–eye calibration (.json)<input name="calibration" placeholder="Path on this computer" required></label>
+              <div class="grid">
+                <label>TCP X, Y, Z (m)<input name="tcp_xyz_m" placeholder="0, 0, 0.12" required></label>
+                <label>Table Z (m)<input name="table_z_m" type="number" step="any" required></label>
+                <label>TCP roll, pitch, yaw (°)<input name="tcp_rpy_deg" placeholder="0, 0, 0"></label>
+                <label>Minimum table clearance (m)<input name="clearance_m" type="number" step="any" value="0.01" required></label>
+                <label>Gripper open (driver units)<input name="gripper_open" type="number" step="any"></label>
+                <label>Gripper close (driver units)<input name="gripper_close" type="number" step="any"></label>
+              </div>
+              <button class="primary" id="apply-grasp" disabled>Apply grasp setup</button>
+            </form>
+          </details>
+          <iframe id="pick-frame" title="Wrist camera and grasp preview" hidden></iframe>
+        </section>
+        <section id="eye" class="panel" hidden>
+          <h1>Hand–eye calibration</h1>
+          <p class="muted">Fix the printed board in place. Move native Nero through distinct wrist positions and angles. Capture at least six settled views with the board visible.</p>
+          <form id="eye-form">
+            <div class="grid">
+              <label>Square (mm)<input name="square" type="number" min="0.1" step="any" value="35" required></label>
+              <label>Marker (mm)<input name="marker" type="number" min="0.1" step="any" value="26" required></label>
+            </div>
+            <label>Wrist camera<select name="camera"></select></label>
+            <div class="actions"><button type="button" id="board">Download board</button><button class="primary" id="sample" disabled>Capture view</button><button type="button" id="reset-eye" disabled>Clear views</button></div>
+            <p id="eye-count" class="muted">0 views captured</p>
+          </form>
+          <form id="solve-form">
+            <label>Save calibration as<input name="output" value="hand_eye_wrist.json" required></label>
+            <div class="actions"><button class="primary" id="solve-eye" disabled>Solve and save</button><button type="button" id="use-eye" hidden>Use in grasp setup</button></div>
+          </form>
+        </section>
+        <section id="policy" class="panel" hidden>
+          <h1>Policy inference</h1>
+          <p class="muted">Preview the first predicted joint action. Use the same follower and camera channels as the training dataset.</p>
+          <form id="policy-form">
+            <label>Checkpoint or Hub model ID<input name="path" required></label>
+            <label>Dataset repo ID<input name="dataset" placeholder="owner/dataset" required></label>
+            <div class="grid">
+              <label>Device<select name="device"><option value="">Automatic</option><option>cpu</option><option>cuda</option><option>mps</option></select></label>
+              <label>Run time (s)<input name="duration" type="number" value="10" step="any" min="0.1" max="120" required></label>
+            </div>
+            <label>Task prompt<input name="task"></label>
+            <button class="primary" id="preview-policy" disabled>Preview policy action</button>
+          </form>
+          <div id="policy-preview" class="result" hidden></div>
+        </section>
+      </main>
+      <aside id="monitor" class="panel">
+        <h2>Live view</h2>
+        <label>Camera<select id="preview-camera"></select></label>
+        <div class="image-frame"><span id="camera-state">Connect a camera in Setup</span><img id="camera-image" alt="Live robot camera" hidden></div>
+        <p id="failed-cameras" class="muted" hidden></p>
+        <h2>Measured position</h2>
+        <div id="measured" class="muted">Connect the follower to read position.</div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

@@ -64,7 +64,7 @@ class RealSenseCapture(_CaptureBase):
     The arrays match LeRobot's ``RealSenseCamera`` so the dataset is the one
     ``lerobot-record`` would write: colour and depth are enabled at the same
     width/height/fps and taken from ONE frameset (colour N and depth N belong together);
-    depth is the z16 map, NOT aligned to colour (LeRobot does not align), uint16 mm,
+    depth is normally the unaligned z16 map, uint16 mm,
     shape (H, W, 1); a warm-up of at least 1 s runs before the first frame counts;
     rotation is applied after capture to both streams. Colour stays BGR on the bus;
     ``RobotWithCameras`` converts it to RGB for the observation, as LeRobot does.
@@ -78,8 +78,14 @@ class RealSenseCapture(_CaptureBase):
     backend = "realsense"
     lost_after_s = 10.0  # no complete frameset for this long → reconnect
 
-    def __init__(self, cfg: CameraConfig) -> None:
+    def __init__(self, cfg: CameraConfig, *, align_depth: bool = False) -> None:
         super().__init__(cfg)
+        if align_depth and not cfg.use_depth:
+            raise ValueError("Aligned depth requires depth capture")
+        self._align_depth = align_depth
+        self._aligner = None
+        self._aligned_pair = (None, None, None)
+        self._depth_axis = self._depth_origin = None
         self.serial: Optional[str] = None
         self._mm_per_unit = 1.0  # raw z16 → mm; 1.0 when the sensor runs at 1 mm units
 
@@ -179,6 +185,14 @@ class RealSenseCapture(_CaptureBase):
                 raise RuntimeError(
                     f"no complete frameset during the {warm:.0f}s warm-up"
                 )
+            if self._align_depth:
+                extrinsics = profile.get_stream(rs.stream.depth).get_extrinsics_to(
+                    profile.get_stream(rs.stream.color)
+                )
+                # The third column of the depth-to-colour rotation is the native depth Z axis.
+                self._depth_axis = np.asarray(extrinsics.rotation[6:9], dtype=float)
+                self._depth_origin = np.asarray(extrinsics.translation, dtype=float)
+                self._aligner = rs.align(rs.stream.color)
         except Exception:
             try:
                 pipe.stop()
@@ -188,6 +202,27 @@ class RealSenseCapture(_CaptureBase):
 
         self.serial = serial
         return pipe
+
+    def colour_depth_m(self, depth_m: float, colour_ray: np.ndarray) -> float:
+        """Convert a reprojected depth sample's native Z to Z along the colour ray."""
+        if self._depth_axis is None or self._depth_origin is None:
+            raise ValueError("Depth-to-colour alignment is unavailable")
+        x, y, z = colour_ray
+        rotation = int(self.cfg.rotation or 0)
+        ray = {0: (x, y, z), 90: (y, -x, z), 180: (-x, -y, z), 270: (-y, x, z)}[rotation]
+        projection = float(self._depth_axis @ ray)
+        if not np.isfinite(projection) or projection <= 0:
+            raise ValueError("Invalid depth projection at the selected pixel")
+        return (depth_m + float(self._depth_axis @ self._depth_origin)) / projection
+
+    def read_aligned_pair(self):
+        with self._lock:
+            return self._aligned_pair
+
+    def stop(self) -> None:
+        super().stop()
+        with self._lock:
+            self._aligned_pair = (None, None, None)
 
     def _depth_mm(self, raw: np.ndarray) -> np.ndarray:
         if self._mm_per_unit == 1.0:
@@ -222,6 +257,7 @@ class RealSenseCapture(_CaptureBase):
             while not self._stop.is_set():
                 try:
                     ok, frames = pipe.try_wait_for_frames(timeout_ms=500)
+                    captured_at = time.time()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("%s: wait_for_frames raised: %s", self.name, exc)
                     break
@@ -248,7 +284,19 @@ class RealSenseCapture(_CaptureBase):
                         depth = cv2.rotate(depth, rotate)
                     depth = depth[..., np.newaxis]  # (H, W) → (H, W, 1), LeRobot layout
                 # One _store per frameset: holder and frame bus get colour and depth together.
-                self._store(frame, depth, time.time())
+                self._store(frame, depth, captured_at if self._align_depth else time.time())
+                if self._aligner is not None:
+                    try:
+                        aligned = self._aligner.process(frames).get_depth_frame()
+                    except RuntimeError as exc:
+                        logger.warning("%s: depth alignment failed: %s", self.name, exc)
+                        continue
+                    if _rs_valid(aligned):
+                        aligned_mm = self._depth_mm(np.array(aligned.get_data(), dtype=np.uint16, copy=True))
+                        if rotate is not None:
+                            aligned_mm = cv2.rotate(aligned_mm, rotate)
+                        with self._lock:
+                            self._aligned_pair = (captured_at, frame, aligned_mm[..., np.newaxis])
 
             try:
                 pipe.stop()

@@ -34,6 +34,8 @@ revobots-arm-test = "revobots_arm.diagnostics:test_main"
 revobot-arm-info = "revobots_arm.diagnostics:info_main"
 revobot-arm-test = "revobots_arm.diagnostics:test_main"
 revobots-arm-hand-eye = "revobots_arm.hand_eye.cli:main"
+revobots-arm-control = "revobots_arm.control.server:main"
+revobots-arm-grasp = "revobots_arm.grasp.server:main"
 revobots-arm-vision = "revobots_arm.vision.cli:main"
 
 [tool.setuptools.packages.find]
@@ -41,4 +43,4 @@ where = ["src"]
 include = ["revobots_arm*"]
 
 [tool.setuptools.package-data]
-revobots_arm = ["assets/**/*", "annotation/web/*"]
+revobots_arm = ["assets/**/*", "annotation/web/*", "control/web/*", "grasp/web/*"]

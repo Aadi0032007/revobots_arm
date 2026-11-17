@@ -30,6 +30,8 @@ class HandEyeCalibration:
     board_translation_rms_mm: float
     board_rotation_rms_deg: float
     version: int = 1
+    camera_serial: str | None = None
+    image_rotation: int | None = None
 
     def __post_init__(self) -> None:
         K = np.asarray(self.camera_matrix, dtype=float)
@@ -38,6 +40,7 @@ class HandEyeCalibration:
         R = X[:3, :3] if X.shape == (4, 4) else np.empty((0, 0))
         if (
             self.version != 1
+            or self.image_rotation not in (None, 0, 90, 180, 270)
             or len(self.image_size_wh) != 2
             or min(self.image_size_wh) <= 0
             or K.shape != (3, 3)
@@ -73,6 +76,10 @@ class HandEyeCalibration:
         """Deproject a colour pixel using axial depth already aligned to that pixel."""
         if not np.isfinite(depth_m) or depth_m <= 0:
             raise ValueError("Aligned depth must be positive and finite")
+        return self.camera_to_base(depth_m * self.pixel_ray(pixel_xy), base_from_link)
+
+    def pixel_ray(self, pixel_xy: tuple[float, float]) -> np.ndarray:
+        """Undistorted ray in the calibrated colour frame, with Z equal to one."""
         pixel = np.asarray(pixel_xy, dtype=float).reshape(1, 1, 2)
         if (
             not np.isfinite(pixel).all()
@@ -83,7 +90,7 @@ class HandEyeCalibration:
         normalized = cv2.undistortPoints(
             pixel, np.asarray(self.camera_matrix, dtype=float), np.asarray(self.dist_coeffs, dtype=float)
         ).reshape(2)
-        return self.camera_to_base(depth_m * np.r_[normalized, 1.0], base_from_link)
+        return np.r_[normalized, 1.0]
 
 
 def _solve_relative_motions(links: np.ndarray, boards: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

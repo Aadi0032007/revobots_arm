@@ -24,8 +24,9 @@ def make_capture(cfg: CameraConfig) -> _CaptureBase:
 class CamerasManager:
     """Own enabled cameras, RTSP streaming, and distance sampling for streamed depth cameras."""
 
-    def __init__(self, cfg: ArmConfig) -> None:
+    def __init__(self, cfg: ArmConfig, *, aligned_camera: str | None = None) -> None:
         self._cfg = cfg
+        self._aligned_camera = aligned_camera
         self.captures: dict[str, _CaptureBase] = {}
         self.failed: list[str] = []
         self.rtsp: Optional[RtspServer] = None
@@ -36,12 +37,18 @@ class CamerasManager:
     def expected_names(self) -> list[str]:
         return self._cfg.camera_names
 
+    def calibration_metadata(self) -> dict:
+        return {
+            name: {"rotation": cap.cfg.rotation, "serial": getattr(cap, "serial", None)}
+            for name, cap in self.captures.items()
+        }
+
     def start(self) -> list[str]:
         if self.captures or self.rtsp is not None:
             return list(self.captures)
         for cam in self._cfg.enabled_cameras:
             try:
-                cap = make_capture(cam)
+                cap = RealSenseCapture(cam, align_depth=True) if cam.name == self._aligned_camera else make_capture(cam)
             except Exception as exc:  # noqa: BLE001 (bad config)
                 logger.error("%s: %s", cam.name, exc)
                 self.failed.append(cam.name)

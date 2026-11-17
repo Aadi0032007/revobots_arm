@@ -25,7 +25,8 @@ class UdpJsonListener:
     """Keeps the most recent JSON object received on ``host:port``."""
 
     def __init__(
-        self, host: str, port: int, label: str = "udp", *, packet_type: str | None = None
+        self, host: str, port: int, label: str = "udp", *, packet_type: str | None = None,
+        session_packets: bool = False,
     ) -> None:
         self._host = host
         self._port = port
@@ -38,6 +39,7 @@ class UdpJsonListener:
         self._rx_t: float = 0.0
         self._last_seq: int = -1
         self._packet_type = packet_type
+        self._session_packets = session_packets or packet_type is not None
         self._session: str | None = None
         self.received = 0
 
@@ -98,17 +100,16 @@ class UdpJsonListener:
                 continue
             seq = pkt.get("seq")
             session = pkt.get("session")
-            if self._packet_type is not None and (
-                pkt.get("type") != self._packet_type
-                or not isinstance(session, str) or not session
-                or type(seq) is not int or seq < 1
-            ):
+            if self._packet_type is not None and pkt.get("type") != self._packet_type:
+                continue
+            if self._session_packets and (not isinstance(session, str) or not session
+                                          or type(seq) is not int or seq < (1 if self._packet_type else 0)):
                 continue
             with self._lock:
-                if self._packet_type is not None and session != self._session:
+                if self._session_packets and session != self._session:
                     self._session = session
                     self._last_seq = -1
-                if isinstance(seq, int) and seq <= self._last_seq and seq > 0:
+                if isinstance(seq, int) and seq <= self._last_seq and (seq > 0 or self._session_packets):
                     continue  # reordered datagram
                 if isinstance(seq, int):
                     self._last_seq = seq

@@ -7,14 +7,14 @@ Control a robot arm from a leader arm, a gamepad, a Cartesian target, or a train
 | Area | What you can do |
 | --- | --- |
 | Robots | Use the native seven-joint AgileX Nero CAN driver, the Nero LeRobot follower adapter, or Koch, SO-100, and SO-101 follower adapters. |
+| Local arm console | Configure the follower, leader or gamepad, and cameras. Preview joint or tool moves, calibrate hand–eye, run policies, and use Hover and grasp. |
 | Teleoperation | Connect a local or UDP leader or gamepad. Use joint copy for compatible devices or follow the leader's tool pose with Cartesian IK. |
 | Cartesian motion | Command XYZ and roll, pitch, and yaw on Nero and SO-101 from the CLI. Read the current pose or dry-run an IK target. |
 | Cameras | Discover and preview OpenCV or RealSense cameras, capture RGB and optional RealSense depth, publish frames through shared memory, and stream RGB over RTSP. |
 | Data | Record manually marked, timed, or continuous sessions. Browse and label episodes in a local web UI, convert them to LeRobot datasets, and replay recorded actions. |
 | Policy inference | Run a trained LeRobot checkpoint alongside teleop and switch between human and policy control. |
-| Vision and hand–eye | Run YOLO or Gemini detection on a selected feed and calibrate a native Nero wrist camera offline from a ChArUco recording. |
-
-The browser UI in this repo is the **episode annotator**. The planned local robot-control console, camera-guided hover and grasp, and simulator integration are future work. The existing hover-and-grasp desktop viewer lives in the separate **REVOCORTEX** project. In this repo, the Nero gamepad's **Pick** action moves to a saved pose.
+| Vision and hand–eye | Run YOLO or Gemini detection on a selected feed. Calibrate a native Nero wrist camera from live ChArUco views or a recording. |
+| Hover and grasp | Select a point on the Nero wrist camera, preview a tabletop move, and confirm it in a local browser. |
 
 ## Control and data pipeline
 
@@ -63,6 +63,25 @@ Install the [hardware driver](src/revobots_arm/robots/) for your arm. Native Ner
 ## Quick start
 
 The examples below use a POSIX shell. Replace example IP addresses, camera sources, and device paths with yours. On Windows a serial device is typically a `COM` port.
+
+### Local browser console
+
+Run this on the computer connected to the follower and cameras. The command opens a browser at `127.0.0.1:8766`. If it does not open automatically, use the full URL printed in the terminal, including the token.
+
+```sh
+revobots-arm-control --preset nero_gamepad
+```
+
+1. Open **Setup**. Choose the follower, enter its CAN or serial settings, and select the input. Use **Add camera** for each OpenCV or RealSense camera. For Hover and grasp, enable RealSense depth and select it under **Grasp camera**.
+2. Click **Connect**. The **Live view** panel shows camera frames and measured joints. **Joints** previews individual motor targets on native Nero, Koch, SO-100, and SO-101. **Tool pose** accepts XYZ in millimetres and roll, pitch, and yaw in degrees on native Nero. SO-101 tool moves use XYZ and require joint positions in degrees.
+3. In **Teleop**, click **Start teleop** after selecting a leader or gamepad. Hold LT to jog with a gamepad. For joint mapping into Nero, use the mapped follower with the existing UDP leader client. Use its destination `127.0.0.1` when running the client on the same machine. For native Nero, select **Cartesian IK** for leader motion.
+4. In **Hand–eye**, download the ChArUco board, enter the measured square and marker dimensions, and capture at least six distinct settled views. Use **Solve and save** to write a JSON calibration or load an existing calibration in **Hover and grasp**.
+5. In **Hover and grasp**, enter the measured tool and table geometry and click **Apply grasp setup**. Click a point in the wrist camera, preview a path, and confirm it. Grasping requires both gripper positions.
+6. In **Policy**, enter the checkpoint, training dataset repo ID, and optional task. Preview its first predicted action, then click **Run policy**. This uses the same LeRobot inference API as the CLI and the cameras already connected in Setup.
+
+The default launch allows feedback and previews. Relaunch with `--execute` to enable confirmed moves and start teleop. **Stop motion** cancels an active operation and requests a position hold during motion. Keep the separate teleop, replay, and standalone grasp commands closed while the browser console owns the arm. Paths are on the computer running the console.
+
+A local leader or USB gamepad plugs into the computer running the console. A remote leader or gamepad uses its existing `revobots-arm-leader-client` or `revobots-arm-gamepad-client` on the other computer. Use the controller computer's IP and the listen port from **Setup**. The control page itself listens on loopback.
 
 ### Gamepad on the robot PC
 
@@ -296,7 +315,32 @@ revobots-arm-hand-eye calibrate --session ./runs/calibration/session_0 \
 
 Print the ChArUco board and measure the printed squares and markers. Keep the board and robot base stationary while recording 12–20 wrist views with measured feedback from all seven joints. Vary the wrist angle around at least two axes, the distance, and the position of the board in the image. Hold each view for about a second. The tool selects settled views and reports reprojection and board-pose errors.
 
-Use the calibration with the same camera mount and image geometry. To map a detection pixel into robot coordinates, `pixel_to_base()` needs depth aligned to colour and the wrist pose at image capture. The current RealSense feed supplies unaligned depth. A complete camera-guided pick also needs a grasp pose and a motion sequence.
+Use the calibration with the same camera mount and image geometry. To map a detection pixel into robot coordinates, `pixel_to_base()` needs depth aligned to colour and the wrist pose at image capture. The grasp camera provides aligned depth to Hover and grasp and raw depth to the existing camera observation channel.
+
+## Hover and grasp on Nero
+
+Open **Hover and grasp** in the local arm console or start the standalone command below.
+
+The local console follows REVOCORTEX's mark, plan, and execute workflow for top-down tabletop picks. It owns the native Nero driver and the calibrated wrist RealSense while it runs. Stop teleop, replay, and any other process that is using those devices before starting the console.
+
+Set `TCP_XYZ_M` to your measured grasp point in `gripper_base` as three comma-separated values in metres. Set `TABLE_Z_M` to the measured height of the work surface in `base_link` on an upright robot. Configure the same camera serial, resolution, and rotation used for hand–eye calibration. Use `--tcp-rpy-deg` if your measured tool axes differ from `gripper_base`. Tool +Z points in the approach direction.
+
+```sh
+# Preview first. Set TCP_XYZ_M and TABLE_Z_M for your setup before running.
+revobots-arm-grasp --preset nero_gamepad --calibration ./nero_wrist.json \
+  --tcp-xyz-m="$TCP_XYZ_M" --table-z-m="$TABLE_Z_M" \
+  --cameras.wrist2D.type=intelrealsense --cameras.wrist2D.source=CAMERA_SERIAL \
+  --cameras.wrist2D.use_depth=true \
+  --robot.gripper_mode=width --gripper-open=0.070 --gripper-close=0
+```
+
+Replace the gripper positions with values that fit your setup. The example uses a 70 mm opening in Nero's width mode, whose command unit is metres. For hover only, omit both gripper positions. The console opens on `127.0.0.1`. Add `--no-browser` to print the URL for manual use.
+
+1. Hold the arm still and click the visible top of the object. The console uses the paired colour and aligned depth data and projects the selection into robot-base XYZ.
+2. Set hover height, grasp depth below the selected surface, and jaw yaw. **Preview hover** moves to the waypoint when executed. **Preview grasp** plans travel above the object, opening, descent, closing, and lifting.
+3. Once you have verified the preview on your setup, restart with `--execute`. Preview the move again and select **Execute plan** within 20 seconds. **Stop** cancels the remaining motion and requests a hold.
+
+Preflight checks reachability, joint limits, travel, and tabletop clearance for the tool point, wrist, and camera. Keep the path clear of fixtures and other objects. The selected point assumes the object stays still. A completed grasp sequence reports that the commands finished. Confirm that the gripper actually picked up the object.
 
 ## Machine info and diagnostics
 

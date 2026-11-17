@@ -170,6 +170,7 @@ def teleop_and_record(
         "preset": cfg.name,
         "continuous": rec.continuous,
         "camera_backends": {n: c.backend for n, c in cameras.captures.items()},
+        "camera_calibration": cameras.calibration_metadata(),
     }
 
     logging.info(
